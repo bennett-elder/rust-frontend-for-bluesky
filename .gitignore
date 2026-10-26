@@ -1,0 +1,7 @@
+/target
+**/dist
+.tools
+.tmp
+.DS_Store
+NOTES.md
+BUGS.md

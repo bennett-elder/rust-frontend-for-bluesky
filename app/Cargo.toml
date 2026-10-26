@@ -1,0 +1,12 @@
+[package]
+name = "bluesky-alt-first-app"
+version = "0.1.0"
+edition = "2021"
+# Same licence as the core crate; the README states MIT, so the manifests should agree.
+license = "MIT"
+
+[dependencies]
+dioxus = "0.7"
+alt-first-core = { path = "../alt-first-core" }
+serde = "1"
+serde_json = "1"

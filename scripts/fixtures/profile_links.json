@@ -1,0 +1,20 @@
+{
+ "did": "did:plc:examplereplier",
+ "handle": "replier.test",
+ "displayName": "Someone Else",
+ "links": [
+  {
+   "uri": "at://did:plc:examplereplier/app.bsky.actor.profile/self",
+   "cid": "bafyexampleprofile",
+   "url": "https://example.com/",
+   "title": "Website",
+   "icon": "https://media.example.test/icon/site.jpg"
+  },
+  {
+   "uri": "at://did:plc:examplereplier/app.bsky.actor.profile/self",
+   "cid": "bafyexampleprofile",
+   "url": "https://example.com/newsletter",
+   "title": "Newsletter"
+  }
+ ]
+}

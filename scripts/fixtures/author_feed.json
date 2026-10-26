@@ -1,0 +1,355 @@
+{
+ "feed": [
+  {
+   "post": {
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/facet",
+    "cid": "bafyexamplecid",
+    "author": {
+     "did": "did:plc:exampleauthor",
+     "handle": "example.test",
+     "displayName": "Example Person",
+     "avatar": "https://media.example.test/avatar/example.test.jpg"
+    },
+    "record": {
+     "$type": "app.bsky.feed.post",
+     "text": "A post with a mention @replier.test, a link https://example.com/page and a #tag",
+     "createdAt": "2026-01-02T03:04:05.000Z",
+     "facets": [
+      {
+       "index": {
+        "byteStart": 22,
+        "byteEnd": 35
+       },
+       "features": [
+        {
+         "$type": "app.bsky.richtext.facet#mention",
+         "did": "did:plc:examplereplier"
+        }
+       ]
+      },
+      {
+       "index": {
+        "byteStart": 44,
+        "byteEnd": 68
+       },
+       "features": [
+        {
+         "$type": "app.bsky.richtext.facet#link",
+         "uri": "https://example.com/page"
+        }
+       ]
+      },
+      {
+       "index": {
+        "byteStart": 75,
+        "byteEnd": 79
+       },
+       "features": [
+        {
+         "$type": "app.bsky.richtext.facet#tag",
+         "tag": "tag"
+        }
+       ]
+      }
+     ]
+    },
+    "indexedAt": "2026-01-02T03:04:05.000Z",
+    "replyCount": 2,
+    "repostCount": 3,
+    "likeCount": 4,
+    "quoteCount": 1,
+    "bookmarkCount": 0,
+    "labels": []
+   }
+  },
+  {
+   "post": {
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/image-alt",
+    "cid": "bafyexamplecid",
+    "author": {
+     "did": "did:plc:exampleauthor",
+     "handle": "example.test",
+     "displayName": "Example Person",
+     "avatar": "https://media.example.test/avatar/example.test.jpg"
+    },
+    "record": {
+     "$type": "app.bsky.feed.post",
+     "text": "Described image",
+     "createdAt": "2026-01-02T03:05:05.000Z"
+    },
+    "indexedAt": "2026-01-02T03:05:05.000Z",
+    "replyCount": 2,
+    "repostCount": 3,
+    "likeCount": 4,
+    "quoteCount": 1,
+    "bookmarkCount": 0,
+    "labels": [],
+    "embed": {
+     "$type": "app.bsky.embed.images#view",
+     "images": [
+      {
+       "thumb": "https://media.example.test/thumb/0.jpg",
+       "fullsize": "https://media.example.test/full/0.jpg",
+       "alt": "A described image"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "post": {
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/image-no-alt",
+    "cid": "bafyexamplecid",
+    "author": {
+     "did": "did:plc:exampleauthor",
+     "handle": "example.test",
+     "displayName": "Example Person",
+     "avatar": "https://media.example.test/avatar/example.test.jpg"
+    },
+    "record": {
+     "$type": "app.bsky.feed.post",
+     "text": "No description",
+     "createdAt": "2026-01-02T03:06:05.000Z"
+    },
+    "indexedAt": "2026-01-02T03:06:05.000Z",
+    "replyCount": 2,
+    "repostCount": 3,
+    "likeCount": 4,
+    "quoteCount": 1,
+    "bookmarkCount": 0,
+    "labels": [],
+    "embed": {
+     "$type": "app.bsky.embed.images#view",
+     "images": [
+      {
+       "thumb": "https://media.example.test/thumb/0.jpg",
+       "fullsize": "https://media.example.test/full/0.jpg",
+       "alt": ""
+      }
+     ]
+    }
+   }
+  },
+  {
+   "post": {
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/video",
+    "cid": "bafyexamplecid",
+    "author": {
+     "did": "did:plc:exampleauthor",
+     "handle": "example.test",
+     "displayName": "Example Person",
+     "avatar": "https://media.example.test/avatar/example.test.jpg"
+    },
+    "record": {
+     "$type": "app.bsky.feed.post",
+     "text": "A video with alt",
+     "createdAt": "2026-01-02T03:07:05.000Z"
+    },
+    "indexedAt": "2026-01-02T03:07:05.000Z",
+    "replyCount": 2,
+    "repostCount": 3,
+    "likeCount": 4,
+    "quoteCount": 1,
+    "bookmarkCount": 0,
+    "labels": [],
+    "embed": {
+     "$type": "app.bsky.embed.video#view",
+     "cid": "bafyexamplevideo",
+     "playlist": "https://video.example.test/playlist.m3u8",
+     "thumbnail": "https://media.example.test/thumb/video.jpg",
+     "aspectRatio": {
+      "width": 1280,
+      "height": 720
+     },
+     "alt": "A described clip"
+    }
+   }
+  },
+  {
+   "post": {
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/video-no-alt",
+    "cid": "bafyexamplecid",
+    "author": {
+     "did": "did:plc:exampleauthor",
+     "handle": "example.test",
+     "displayName": "Example Person",
+     "avatar": "https://media.example.test/avatar/example.test.jpg"
+    },
+    "record": {
+     "$type": "app.bsky.feed.post",
+     "text": "A silent loop",
+     "createdAt": "2026-01-02T03:08:05.000Z"
+    },
+    "indexedAt": "2026-01-02T03:08:05.000Z",
+    "replyCount": 2,
+    "repostCount": 3,
+    "likeCount": 4,
+    "quoteCount": 1,
+    "bookmarkCount": 0,
+    "labels": [],
+    "embed": {
+     "$type": "app.bsky.embed.video#view",
+     "cid": "bafyexamplevideo",
+     "playlist": "https://video.example.test/playlist.m3u8",
+     "thumbnail": "https://media.example.test/thumb/video.jpg",
+     "aspectRatio": {
+      "width": 1280,
+      "height": 720
+     }
+    }
+   }
+  },
+  {
+   "post": {
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/gif",
+    "cid": "bafyexamplecid",
+    "author": {
+     "did": "did:plc:exampleauthor",
+     "handle": "example.test",
+     "displayName": "Example Person",
+     "avatar": "https://media.example.test/avatar/example.test.jpg"
+    },
+    "record": {
+     "$type": "app.bsky.feed.post",
+     "text": "A loop",
+     "createdAt": "2026-01-02T03:09:05.000Z"
+    },
+    "indexedAt": "2026-01-02T03:09:05.000Z",
+    "replyCount": 2,
+    "repostCount": 3,
+    "likeCount": 4,
+    "quoteCount": 1,
+    "bookmarkCount": 0,
+    "labels": [],
+    "embed": {
+     "$type": "app.bsky.embed.video#view",
+     "cid": "bafyexamplevideo",
+     "playlist": "https://video.example.test/playlist.m3u8",
+     "thumbnail": "https://media.example.test/thumb/video.jpg",
+     "aspectRatio": {
+      "width": 1280,
+      "height": 720
+     },
+     "alt": "A loop, described",
+     "presentation": "gif"
+    }
+   }
+  },
+  {
+   "post": {
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/link",
+    "cid": "bafyexamplecid",
+    "author": {
+     "did": "did:plc:exampleauthor",
+     "handle": "example.test",
+     "displayName": "Example Person",
+     "avatar": "https://media.example.test/avatar/example.test.jpg"
+    },
+    "record": {
+     "$type": "app.bsky.feed.post",
+     "text": "A link card",
+     "createdAt": "2026-01-02T03:10:05.000Z"
+    },
+    "indexedAt": "2026-01-02T03:10:05.000Z",
+    "replyCount": 2,
+    "repostCount": 3,
+    "likeCount": 4,
+    "quoteCount": 1,
+    "bookmarkCount": 0,
+    "labels": [],
+    "embed": {
+     "$type": "app.bsky.embed.external#view",
+     "external": {
+      "uri": "https://example.com/story",
+      "title": "A story",
+      "description": "About something",
+      "thumb": "https://media.example.test/thumb/link.jpg"
+     }
+    }
+   }
+  },
+  {
+   "post": {
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/quote",
+    "cid": "bafyexamplecid",
+    "author": {
+     "did": "did:plc:exampleauthor",
+     "handle": "example.test",
+     "displayName": "Example Person",
+     "avatar": "https://media.example.test/avatar/example.test.jpg"
+    },
+    "record": {
+     "$type": "app.bsky.feed.post",
+     "text": "Quoting this",
+     "createdAt": "2026-01-02T03:11:05.000Z"
+    },
+    "indexedAt": "2026-01-02T03:11:05.000Z",
+    "replyCount": 2,
+    "repostCount": 3,
+    "likeCount": 4,
+    "quoteCount": 1,
+    "bookmarkCount": 0,
+    "labels": [],
+    "embed": {
+     "$type": "app.bsky.embed.record#view",
+     "record": {
+      "$type": "app.bsky.embed.record#viewRecord",
+      "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/original",
+      "cid": "bafyexamplequoted",
+      "author": {
+       "did": "did:plc:examplereplier",
+       "handle": "replier.test",
+       "displayName": "Someone Else",
+       "avatar": "https://media.example.test/avatar/replier.test.jpg"
+      },
+      "value": {
+       "$type": "app.bsky.feed.post",
+       "text": "The quoted post",
+       "createdAt": "2026-01-01T00:00:00.000Z"
+      },
+      "indexedAt": "2026-01-01T00:00:01.000Z",
+      "labels": []
+     }
+    }
+   },
+   "reason": {
+    "$type": "app.bsky.feed.defs#reasonRepost",
+    "by": {
+     "did": "did:plc:examplereplier",
+     "handle": "replier.test",
+     "displayName": "Someone Else",
+     "avatar": "https://media.example.test/avatar/replier.test.jpg"
+    },
+    "indexedAt": "2026-01-02T04:00:00.000Z"
+   }
+  },
+  {
+   "post": {
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/pinned",
+    "cid": "bafyexamplecid",
+    "author": {
+     "did": "did:plc:exampleauthor",
+     "handle": "example.test",
+     "displayName": "Example Person",
+     "avatar": "https://media.example.test/avatar/example.test.jpg"
+    },
+    "record": {
+     "$type": "app.bsky.feed.post",
+     "text": "Pinned post",
+     "createdAt": "2026-01-02T03:12:05.000Z"
+    },
+    "indexedAt": "2026-01-02T03:12:05.000Z",
+    "replyCount": 2,
+    "repostCount": 3,
+    "likeCount": 4,
+    "quoteCount": 1,
+    "bookmarkCount": 0,
+    "labels": []
+   },
+   "reason": {
+    "$type": "app.bsky.feed.defs#reasonPin"
+   }
+  }
+ ],
+ "cursor": "example-cursor"
+}

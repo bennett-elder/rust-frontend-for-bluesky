@@ -1,0 +1,16 @@
+{
+ "did": "did:plc:exampleauthor",
+ "handle": "example.test",
+ "displayName": "Example Person",
+ "description": "A synthetic profile used by the tests, not a real account.",
+ "avatar": "https://media.example.test/avatar/example.test.jpg",
+ "banner": "https://media.example.test/banner/example.test.jpg",
+ "followersCount": 1234,
+ "followsCount": 12,
+ "postsCount": 34,
+ "createdAt": "2023-01-01T00:00:00.000Z",
+ "labels": [],
+ "viewer": {
+  "muted": false
+ }
+}

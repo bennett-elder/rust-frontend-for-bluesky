@@ -1,0 +1,2025 @@
+/*
+ * Two themes, one set of tokens.
+ *
+ * The system preference is honoured in CSS (`prefers-color-scheme`), so the first
+ * paint is already correct with no JS involved. An explicit choice in Settings sets
+ * `data-theme="light"|"dark"` on `<html>`, and that block wins over the media query
+ * because it comes later with equal specificity. `"system"` removes the attribute.
+ *
+ * Both palettes are held to WCAG AA by `scripts/check_contrast.mjs`, which measures
+ * the rendered page in each theme — dark values that "look fine" on an OLED panel
+ * are exactly what that check exists to catch.
+ */
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #f6f7f9;
+  --surface-strong: #eceef1;
+  --border: #e3e6ea;
+  --border-strong: #cfd4db;
+  --text: #0f1419;
+  --text-muted: #4a5b6b;
+  /* 5.2:1 on white, 4.8:1 on --surface. The old #8b98a5 was 2.94:1 — it looked
+     "quiet" on a retina screen and failed WCAG AA for every handle, timestamp and
+     count we render, which is most of the small text in the app. */
+  --text-subtle: #5f6f80;
+  /* Boundary for fields that have no visible label, only a placeholder: 4.1:1. */
+  --control-border: #767f8b;
+  /* #006aff is 4.65:1 on white but 4.35:1 on --surface, and links do land on
+     surface (error rows, quote cards). */
+  --accent: #0060e0;
+  --danger: #c62828;
+  /* Text painted on a --text fill (buttons are near-black in light, near-white in
+     dark, so a hard-coded #fff would vanish in one of the two). */
+  --on-text: #ffffff;
+  --on-accent: #ffffff;
+  --on-danger: #ffffff;
+  /* The liked heart is also a count, so it has to clear 4.5:1 as text: #ec4899 was
+     3.51:1 on white. */
+  --like: #d61f69;
+  --success-bg: #e8f5ec;
+  --success-border: #b7dfc5;
+  --success-text: #1c6b3c;
+  --highlight-bg: #eef5ff;
+  --highlight-border: #b9d4ff;
+  --error-bg: #fdf1f0;
+  --error-border: #f3c9c5;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0f14;
+  --surface: #0f151c;
+  --surface-strong: #161f2a;
+  --border: #1e2833;
+  --border-strong: #2a3947;
+  --text: #e7edf3;
+  --text-muted: #8ba3b8;
+  --text-subtle: #7a8b9c;
+  --control-border: #5b6b7d;
+  /* #0060e0 disappears on a dark ground; the lighter blue is 6.7:1 on --bg. */
+  --accent: #4c9aff;
+  --danger: #ff7b72;
+  --on-text: #0b0f14;
+  --on-accent: #0b0f14;
+  --on-danger: #2a0f0c;
+  --like: #f472b6;
+  --success-bg: #12251a;
+  --success-border: #1f4430;
+  --success-text: #7ee2a8;
+  --highlight-bg: #10243d;
+  --highlight-border: #1d3d66;
+  --error-bg: #2a1512;
+  --error-border: #55241f;
+}
+
+/* System dark, for the first paint before the app boots and for anyone who never
+ * opens Settings. Same values as the block above on purpose — `check_contrast.mjs`
+ * runs both paths (emulated media, and the explicit attribute) so the two cannot
+ * drift apart silently. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b0f14;
+    --surface: #0f151c;
+    --surface-strong: #161f2a;
+    --border: #1e2833;
+    --border-strong: #2a3947;
+    --text: #e7edf3;
+    --text-muted: #8ba3b8;
+    --text-subtle: #7a8b9c;
+    --control-border: #5b6b7d;
+    --accent: #4c9aff;
+    --danger: #ff7b72;
+    --on-text: #0b0f14;
+  --on-accent: #0b0f14;
+  --on-danger: #2a0f0c;
+    --like: #f472b6;
+    --success-bg: #12251a;
+    --success-border: #1f4430;
+    --success-text: #7ee2a8;
+    --highlight-bg: #10243d;
+    --highlight-border: #1d3d66;
+    --error-bg: #2a1512;
+    --error-border: #55241f;
+  }
+}
+
+
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Desktop is a two-column shell: a navigation rail and the reading column, the
+   shape the official web app uses. Narrow screens (and the Android WebView) fall
+   back to the header + tab row that was already there. */
+.shell {
+  display: flex;
+  gap: 1.25rem;
+  max-width: 62rem;
+  margin: 0 auto;
+  align-items: flex-start;
+}
+
+.rail {
+  display: none;
+}
+
+.rail__item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.rail__item:hover {
+  background: var(--surface);
+}
+
+.rail__item--active {
+  font-weight: 700;
+}
+
+.rail__item .icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.rail__item--active .icon {
+  color: var(--text);
+}
+
+.rail__label {
+  padding: 0.9rem 0.65rem 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.rail__item--sub {
+  padding-left: 1.15rem;
+  color: var(--text-muted);
+}
+
+/* Profile and Settings read as their own group. They are *not* pushed to the bottom
+   of the viewport: with only Home/Discover/Feeds above them that produced a large
+   unexplained gap, which is the kind of thing a reader notices and distrusts. */
+.rail__bottom {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (min-width: 900px) {
+  .rail {
+    display: flex;
+    flex-direction: column;
+    width: 14.5rem;
+    flex: 0 0 14.5rem;
+    padding: 1rem 0.4rem;
+    position: sticky;
+    top: 0;
+    /* Content height, not viewport height: the rail ends after its items instead of
+       stretching to 100vh and leaving a gap in the middle. */
+    max-height: 100vh;
+    /* `overflow-y: auto` alone computes the other axis to auto as well, which put a
+       horizontal scrollbar under a rail that never scrolls sideways. */
+    overflow: hidden auto;
+    scrollbar-width: thin;
+  }
+
+  .timeline {
+    margin: 0;
+    flex: 1 1 auto;
+  }
+}
+
+.timeline {
+  max-width: 38rem;
+  margin: 0 auto;
+  padding: 1rem 0.9rem 3rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.app-header {
+  padding: 0.25rem 0 0.9rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+  /* Anchors the account menu, which drops out of the header. */
+  position: relative;
+}
+
+/* Signed out there is no account card, so the badge and Sign in take its place on the
+   left — next to each other, not with Sign in flung to the right margin (that is what
+   `.session-button`'s `margin-left: auto` does when it is the only thing in the row). */
+.app-header__row .badge + .session-button {
+  margin-left: 0.35rem;
+}
+
+
+/* The rail's account card: full width, above Home. The narrow header carries its own
+   copy of the same control, and exactly one of the two is ever visible. */
+.rail .account {
+  width: 100%;
+  margin: 0 0 0.6rem;
+}
+
+/* Signed out: the rail's equivalent of the account card, in the same slot above Home.
+   Same height as the account button (2rem avatar + 0.4rem padding), or Home jumps up
+   the moment you sign out — the two states must occupy the same box. */
+.rail__session {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.8rem;
+  margin: 0 0 0.6rem;
+  padding: 0 0.2rem;
+}
+
+.rail__session .session-button {
+  margin-left: 0;
+}
+
+.rail .account__button {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.92rem;
+}
+
+.rail .account__menu {
+  top: 3rem;
+}
+
+.account {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-right: auto;
+}
+
+.account__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 13rem;
+  padding: 0.15rem 0.55rem 0.15rem 0.15rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.account__button:hover,
+.account__button[aria-expanded="true"] {
+  background: var(--surface-strong);
+}
+
+.account__avatar,
+.account__initial {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-strong);
+}
+
+.account__initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+
+.account__handle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Anchored to the avatar, not the row's right edge. */
+.account__menu {
+  left: 0;
+  right: auto;
+  top: 2.5rem;
+}
+
+.app-header__brand {
+  margin: 0.35rem 0 0.15rem;
+}
+
+/* The name line: product name, what it is, and where to get the source. The tagline and
+   the link sit quieter than the name, so the name stays the headline at a glance. */
+.app-header__tagline {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.app-header__fork {
+  color: var(--text-subtle);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.app-header__fork:hover {
+  color: var(--accent);
+}
+
+
+
+.session-button--icon {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.32rem 0.45rem;
+}
+
+.session-button--icon .icon {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+/* A small disclosure under the header, the way a settings menu behaves in the
+   official app: one item today, more only when there is parity to justify them. */
+.rail__bottom {
+  position: relative;
+}
+
+.app-header__row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--success-text);
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+}
+
+.actor-form {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.85rem 0 0.7rem;
+}
+
+.session-button {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+}
+
+.badge--session {
+  color: var(--accent);
+  border-color: var(--highlight-border);
+  background: var(--highlight-bg);
+}
+
+.feed-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0.15rem;
+  /* Sticky, so the tabs stay at the top of the column while the feed scrolls — the
+     shape the official web app uses, and the only way the double-click-to-top gesture
+     is reachable once you are 900 px down. Padding, not a top margin: a margin is
+     unpainted, and posts would slide through the gap above a pinned row. */
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  margin: 0 0 0.75rem;
+  padding-top: 0.55rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.feed-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.feed-tab {
+  position: relative;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 0.55rem 0.7rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.feed-tab:hover {
+  color: var(--text);
+}
+
+.feed-tab--active {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* Bluesky's tab indicator: a short rounded bar under the active label. */
+.feed-tab--active::after {
+  content: "";
+  position: absolute;
+  left: 0.3rem;
+  right: 0.3rem;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--text);
+}
+
+.login-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* The form is a column on the sign-in page, so a flex basis here would set the field's
+   *height* — it rendered as a tall box. Width is the axis that matters in a column. */
+.login-form .actor-input {
+  flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.login-form button {
+  background: var(--text);
+  border: 1px solid var(--text);
+  border-radius: 8px;
+  color: var(--on-text);
+  font: inherit;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+/* The sign-in page: a handle, then the two ways to prove it is yours. Each option gets its
+   own block so the difference between them is visible rather than implied by a mode. */
+.signin {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 32rem;
+}
+
+.signin__label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.signin__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.signin__field .actor-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.signin__explain {
+  margin: 0;
+}
+
+/* Both options are cards of the same shape, so the `or` separates like from like. */
+.signin__option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.85rem;
+  margin: 0;
+}
+
+.signin__option-title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.signin__or {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--text-subtle);
+  font-size: 0.8rem;
+}
+
+.signin__or::before,
+.signin__or::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+
+/* Same weight as the app-password button: inside their cards both are the primary action,
+   so neither should look like the lesser option. */
+.signin__primary {
+  margin-left: 0;
+  width: 100%;
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--on-text);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.login-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.82rem;
+}
+
+.login-remember {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+}
+
+.actor-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  padding: 0.5rem 0.65rem;
+}
+
+.actor-form button {
+  background: var(--text);
+  border: 1px solid var(--text);
+  border-radius: 8px;
+  color: var(--on-text);
+  font: inherit;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  user-select: none;
+}
+
+.toggle input {
+  accent-color: var(--accent);
+  width: 1rem;
+  height: 1rem;
+}
+
+.note {
+  margin: 0.7rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.error {
+  margin: 1rem 0;
+  color: var(--danger);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+}
+
+.actor-input:focus-visible,
+.toggle input:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+
+/* ---- posts ---- */
+
+/*
+ * Borderless rows with a single divider, like the official feed. Off-screen
+ * posts skip layout and paint but keep their DOM nodes, so find-in-page,
+ * cross-post selection, and screen-reader browse mode still work.
+ */
+.post {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr);
+  gap: 0.6rem;
+  padding: 0.8rem 0 0.75rem;
+  border-bottom: 1px solid var(--border);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
+}
+
+/* The avatar link must cover the avatar and nothing else. As a bare grid item it
+   stretched the height of the row, so the whole left gutter — the space under the
+   picture — was a link to the profile. */
+.avatar-link {
+  align-self: start;
+  display: block;
+  width: 2.4rem;
+  height: 2.4rem;
+}
+
+.avatar {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-strong);
+}
+
+.avatar--empty {
+  display: block;
+}
+
+.post__main {
+  min-width: 0;
+}
+
+.post__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.post__author {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.post__meta {
+  font-size: 0.84rem;
+  color: var(--text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.post__repost {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.15rem;
+  color: var(--text-subtle);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.post__repost .icon {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+/* Quoted post */
+.quote {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  background: var(--bg);
+}
+
+.quote__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.quote__author {
+  font-weight: 700;
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quote__meta {
+  color: var(--text-subtle);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quote__text {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.quote--missing {
+  color: var(--text-subtle);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.post__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  line-height: 1;
+}
+
+/* The like control is a real button now; keep it looking like the static ones. */
+button.post__action {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.post__action:hover {
+  color: var(--text);
+}
+
+/* `button.post__action` sets colour at (0,1,1) and its `:hover` at (0,2,1), so a
+   plain `.post__action--liked` (0,1,0) never won: a liked heart kept the grey of
+   an unliked one and only turned pink while the pointer was over it. Match the
+   selector shape to beat it, on both states. */
+button.post__action--liked,
+button.post__action--liked:hover {
+  color: var(--like);
+}
+
+/* A reposted post says so the same way a liked one does: colour that survives not
+   being hovered, matched to `button.post__action` so it actually wins. */
+button.post__action--reposted,
+button.post__action--reposted:hover {
+  color: var(--success-text);
+}
+
+/* Fill the heart once it is yours. The icon is a stroke-only path, so colour
+   alone was the whole change — a 1rem outline in pink reads as decoration, not
+   as "liked", which is why only the counter looked like it moved. */
+.post__action--liked .icon {
+  fill: currentColor;
+}
+
+/* A like in flight: the button is disabled (see PostCard) so a second tap cannot
+   race the record that is being written, and it says so instead of going mute. */
+button.post__action:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.post__action--pending .icon {
+  animation: like-pending 900ms ease-in-out infinite;
+}
+
+@keyframes like-pending {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .post__action--pending .icon {
+    animation: none;
+  }
+}
+
+/* A failed like reverts the heart and says why, under the card. */
+.post__action-error {
+  margin: 0.35rem 0 0;
+  color: var(--danger);
+  font-size: 0.8rem;
+}
+
+.feed-end {
+  text-align: center;
+}
+
+.load-more {
+  display: block;
+  width: 100%;
+  margin: 1rem 0 0.5rem;
+  padding: 0.65rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.load-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.load-more:hover:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+/* Announced when a cached feed turns out to have newer posts. Sticky so it stays
+   reachable while the reader keeps scrolling, but it never moves the list. */
+.new-posts {
+  position: sticky;
+  /* Parked below the pinned tab row (z-index 6): at 0.5rem it slid behind them and
+     could not be clicked. */
+  top: 3rem;
+  z-index: 5;
+  display: block;
+  margin: 0.75rem auto;
+  padding: 0.5rem 1.1rem;
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 25%);
+}
+
+.new-posts:hover {
+  background: var(--surface);
+}
+
+.feed-error {
+  margin: 0.75rem 0;
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+}
+
+.feed-error__headline {
+  margin: 0 0 0.35rem;
+  font-weight: 700;
+}
+
+.feed-error__detail {
+  font-family: ui-monospace, sfmono-regular, menlo, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  opacity: 0.8;
+}
+
+/* Programmatic trigger only: clicking is how JS asks Rust to revalidate. */
+.refresh-tick {
+  display: none;
+}
+
+.post__actions {
+  display: flex;
+  gap: 2.2rem;
+  margin-top: 0.6rem;
+  color: var(--text-subtle);
+  font-size: 0.78rem;
+}
+
+.post__action-glyph {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.icon {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+}
+
+.thread__back {
+  align-self: flex-start;
+  margin: 0.4rem 0 0.2rem;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  padding: 0.2rem 0;
+  cursor: pointer;
+}
+
+.thread-node {
+  /* Indent each reply level, with a rail so nesting stays legible. The level is
+     capped in Rust (INDENT_CAP), so `--depth` here never exceeds it. */
+  margin-left: calc(var(--depth) * 0.9rem);
+}
+
+/* Only replies hang off a rail. The opened post used to draw one too, which read
+   as "nested under whatever is above it" — the one thing it is not. */
+.thread-node--reply {
+  border-left: 2px solid var(--border);
+  padding-left: 0.55rem;
+}
+
+/* And the post you opened is marked, in the same accent used for links. */
+.thread-node--focal > .post:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* Past the indent cap, nesting is flat, so the parent is named instead. */
+.thread-node__parent {
+  margin: 0.1rem 0 0.2rem;
+  color: var(--text-subtle);
+  font-size: 0.78rem;
+}
+
+/* Ancestors are context: grouped, labelled, and closed off from the conversation. */
+.thread-ancestors {
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.thread-ancestors__label {
+  margin: 0.3rem 0 0.1rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.thread-node > .post:first-child {
+  border-top: none;
+}
+
+.thread-missing,
+.thread-more {
+  margin: 0.5rem 0;
+  color: var(--text-subtle);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+/* Folded replies: a button, not <details>, because the children must not mount
+   until it is opened. Quiet until hovered, like the old summary line. */
+.thread-more {
+  display: block;
+  width: 100%;
+  margin: 0.5rem 0;
+  padding: 0.45rem 0;
+  background: none;
+  border: 0;
+  color: var(--text-subtle);
+  font: inherit;
+  font-size: 0.8rem;
+  font-style: italic;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.thread-more:hover {
+  color: var(--text);
+}
+
+.post__action--reply {
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* ALT pill: keeps the description reachable after the image is revealed. */
+.alt-first__alt-pill {
+  position: absolute;
+  right: 0.4rem;
+  bottom: 0.4rem;
+  border: none;
+  border-radius: 6px;
+  background: rgba(15, 20, 25, 0.68);
+  color: #fff;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* A reply in a feed says who it answers; otherwise the only clue is what it says. */
+.post__reply-context {
+  margin: 0 0 0.2rem;
+  color: var(--text-subtle);
+  font-size: 0.78rem;
+}
+
+.post__text {
+  margin: 0.3rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Post body is the thread affordance, as in the official client. */
+.post__open {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Text must stay selectable: navigation is handled by a delegated click
+   listener (see install_click_navigation), not by wrapping the post in an <a>. */
+.post__text {
+  user-select: text;
+}
+
+.post__permalink {
+  color: inherit;
+  text-decoration: none;
+  /* The timestamp is the only way to a post's own URL from the card, and at
+     0.84rem it is far below a finger-sized target. Negative margins give it a
+     ~44 px hit area without moving any layout. */
+  display: inline-block;
+  padding: 0.7rem 0.4rem;
+  margin: -0.7rem -0.4rem;
+}
+
+.post__permalink:hover {
+  text-decoration: underline;
+}
+
+/* ---- profile ---- */
+
+.profile {
+  display: flex;
+  flex-direction: column;
+}
+
+.profile__header {
+  position: relative;
+  margin-bottom: 2.2rem;
+}
+
+.profile__banner {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 1;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.profile__banner--empty {
+  background: var(--surface-strong);
+}
+
+.profile__avatar {
+  position: absolute;
+  left: 0.75rem;
+  bottom: -2rem;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  border: 3px solid var(--bg);
+  object-fit: cover;
+  background: var(--surface-strong);
+}
+
+.profile__avatar--empty {
+  background: var(--surface-strong);
+}
+
+.profile__name {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.profile__pronouns {
+  font-weight: 500;
+  color: var(--text-subtle);
+}
+
+.profile__handle {
+  margin: 0.1rem 0 0;
+  color: var(--text-subtle);
+  font-size: 0.88rem;
+}
+
+.profile__desc {
+  margin: 0.6rem 0 0;
+  font-size: 0.92rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.profile__stats {
+  margin: 0.55rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.profile__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+
+.profile__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.profile__link:hover {
+  background: var(--surface);
+}
+
+.profile__link-icon {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.post__open:hover .post__text {
+  color: var(--text);
+}
+
+.post__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* Rich-text facets: mentions, links, hashtags. */
+.post__text .facet {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.post__text .facet:hover {
+  text-decoration: underline;
+}
+
+.embed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+}
+
+/* ---- alt-first gate (the collapsed state) ---- */
+
+.alt-first {
+  margin: 0;
+}
+
+.alt-first__gate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  cursor: pointer;
+}
+
+.alt-first__gate:hover {
+  background: var(--surface-strong);
+}
+
+.alt-first__gate--compact {
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.75rem;
+}
+
+.alt-first__kicker {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.alt-first__text {
+  font-size: 0.92rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.alt-first__text--missing {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.alt-first__action {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ---- revealed media ---- */
+
+.alt-first__media-wrap {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.alt-first__media-wrap--link {
+  margin-top: 0.5rem;
+}
+
+.alt-first__media-link {
+  display: block;
+}
+
+.alt-first__media {
+  display: block;
+  width: 100%;
+  max-height: 75vh;
+  aspect-ratio: var(--media-ratio, auto);
+  object-fit: cover;
+  background: var(--surface-strong);
+}
+
+.alt-first__close,
+.alt-first__play {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  background: rgba(15, 20, 25, 0.68);
+  color: #fff;
+  cursor: pointer;
+  line-height: 1;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.alt-first__close {
+  top: 0.4rem;
+  right: 0.4rem;
+  width: 1.7rem;
+  height: 1.7rem;
+  font-size: 1.05rem;
+}
+
+.alt-first__play {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 3.1rem;
+  height: 3.1rem;
+  font-size: 1.15rem;
+  padding-left: 0.15rem;
+}
+
+.alt-first__caption {
+  margin-top: 0.35rem;
+  padding-left: 0.55rem;
+  border-left: 2px solid var(--border-strong);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* ---- link cards ---- */
+
+.link-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.link-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem 0.75rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.link-card__title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.link-card__desc {
+  font-size: 0.83rem;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.link-card__host {
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+}
+
+
+.post__action-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The rail owns these destinations on desktop, so the header duplicates go.
+   These live at the end of the sheet on purpose: `.feed-tabs` and
+   `.session-button` are defined earlier with equal specificity, so an earlier
+   media query loses to them no matter that it is a media query. */
+/* Desktop has the rail for navigation, so the header keeps only the tab row as the
+   column's pinned top bar — the app name would otherwise appear twice, and the gear
+   duplicates Settings in the rail. The tabs are deliberately *not* hidden here: they
+   were, briefly, when this rule started working again, and the column lost its
+   navigation. */
+@media (min-width: 900px) {
+  /* The account lives in the rail at this width, and the column's gear duplicates
+     Settings there too. The app's own title stays: it belongs above the tabs. */
+  .app-header .account,
+  .app-header .session-button--icon {
+    display: none;
+  }
+
+  /* Signed out, the rail holds the badge and Sign in — the column is the reading
+     surface and must not carry account controls. The login form still renders in the
+     column when the rail's button opens it. */
+  .app-header__row .badge,
+  .app-header__row > .session-button:not(.session-button--icon) {
+    display: none;
+  }
+}
+
+/* Explore: a search field, then trending stories until something is searched. */
+.explore {
+  padding-top: 0.3rem;
+}
+
+.explore__search {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+
+.explore__search .actor-input {
+  flex: 1 1 auto;
+}
+
+.explore__search button {
+  background: var(--text);
+  border: 1px solid var(--text);
+  border-radius: 8px;
+  color: var(--on-text);
+  font: inherit;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+.trend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.trend-list li {
+  border-bottom: 1px solid var(--border);
+}
+
+.trend-list__button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.7rem 0.2rem;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trend-list__button:hover .trend-list__name {
+  text-decoration: underline;
+}
+
+.trend-list__name {
+  font-weight: 600;
+}
+
+.trend-list__meta {
+  color: var(--text-subtle);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+/* The Feeds page: the account's feeds listed on their own screen, instead of a
+   growing list inside the rail. */
+.feeds-page {
+  padding-top: 0.3rem;
+}
+
+.page-title {
+  margin: 0.2rem 0 0.7rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.feed-list li {
+  border-bottom: 1px solid var(--border);
+}
+
+.feed-list__link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  padding: 0.7rem 0.2rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.feed-list__link:hover .feed-list__name {
+  text-decoration: underline;
+}
+
+.feed-list__name {
+  font-weight: 600;
+}
+
+.feed-list__meta {
+  color: var(--text-subtle);
+  font-size: 0.8rem;
+}
+
+/* A card with an open menu must escape its own paint containment: `content-visibility:
+   auto` implies `contain: layout style paint`, which clips the dropdown to the card
+   and lets the following card paint over it — the menu looked like it slid behind the
+   next post. Lifting the card out of containment and above its siblings fixes both. */
+.post:has(.post__menu) {
+  content-visibility: visible;
+  position: relative;
+  z-index: 12;
+}
+
+/* Post menu: share, mute, block. Sits at the end of the header row and floats above
+   the card, so it works from a feed without opening the post. */
+/* Only the first of the two end controls takes up the slack: with both pushing right,
+   the share arrow was marooned far from the context menu it belongs beside. */
+.post__menu-wrap {
+  position: relative;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.post--gated {
+  display: block;
+}
+
+.post__gated-note {
+  margin: 0.35rem 0;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+/* The row's own 2.2rem gap still separates the two, so the second one cancels most of
+   it: share and the context menu read as one cluster at the end of the row. */
+.post__menu-wrap + .post__menu-wrap {
+  margin-left: calc(0.4rem - 2.2rem);
+}
+
+/* Same weight as the other actions: no border, because a bordered square in an icon
+   row reads as a different kind of control. */
+.post__menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-subtle);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.post__menu-toggle:hover,
+.post__menu-toggle[aria-expanded="true"] {
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.post__menu {
+  position: absolute;
+  right: 0;
+  top: 1.9rem;
+  z-index: 9;
+  min-width: 14rem;
+  max-width: 19rem;
+  padding: 0.35rem;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 18%);
+  text-align: left;
+}
+
+.post__menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.post__menu-item:hover:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+.post__menu-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.post__menu-item--danger {
+  color: var(--danger);
+}
+
+.post__menu-sep {
+  height: 1px;
+  margin: 0.3rem 0.2rem;
+  background: var(--border);
+}
+
+.post__menu-note {
+  margin: 0.15rem 0.6rem 0.3rem;
+  color: var(--text-subtle);
+  font-size: 0.76rem;
+}
+
+.post__menu-confirm {
+  padding: 0.35rem 0.3rem 0.15rem;
+}
+
+.post__menu-confirm__title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.post__menu-confirm__body {
+  margin: 0.3rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.post__menu-confirm__row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.post__menu-confirm__go {
+  padding: 0.35rem 0.8rem;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 999px;
+  color: var(--on-danger);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.post__menu-confirm__go:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.post__menu-error {
+  margin: 0.35rem 0.15rem 0.15rem;
+  padding: 0.4rem 0.5rem;
+  color: var(--danger);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+/* Reply box: one per thread, under the conversation it answers. */
+.reply-box {
+  margin: 1.25rem 0 0;
+  padding: 0.85rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.reply-box__note {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 0.85rem;
+}
+
+.reply-box__input {
+  display: block;
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.6rem 0.7rem;
+  background: var(--bg);
+  /* A text field with only a placeholder is identified by its border. */
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+.reply-box__row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.55rem;
+}
+
+.reply-box__count {
+  color: var(--text-subtle);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.reply-box__send {
+  padding: 0.45rem 1.1rem;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  /* Not #fff: in dark the accent is a light blue, and white on it is 2.8:1. */
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reply-box__send:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.reply-box__error {
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0.7rem;
+  color: var(--danger);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 8px;
+  font-size: 0.82rem;
+}
+
+/* Mute / Block on a profile: quiet until they matter, and never offered on your own. */
+.profile__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.85rem 0 0.25rem;
+}
+
+.profile__action {
+  padding: 0.4rem 1rem;
+  background: none;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.profile__action:hover:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+.profile__action--on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.profile__action--danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.profile__action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.profile__action-error {
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0.7rem;
+  color: var(--danger);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 8px;
+  font-size: 0.82rem;
+}
+
+
+/* Settings page: one row per preference, label and explanation. */
+.settings-page {
+  padding-top: 0.3rem;
+}
+
+.settings-row {
+  padding: 0.8rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-row__control {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.settings-row__hint {
+  margin: 0.35rem 0 0;
+  color: var(--text-subtle);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+/* Theme choice: three segmented buttons, so the current one is visible without
+/* Block confirmation: a block is public and other people can see its effects, so it
+   asks first. Unblocking does not — it only ever undoes. */
+.block-confirm {
+  max-width: 30rem;
+  margin: 0.85rem 0 0.25rem;
+  padding: 0.85rem 0.95rem;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+}
+
+.block-confirm__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.block-confirm__body {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.block-confirm__row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.block-confirm__confirm {
+  padding: 0.4rem 1.1rem;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 999px;
+  /* Not #fff: in dark the danger colour is a light coral. */
+  color: var(--on-danger);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.block-confirm__confirm:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+
+   opening anything, and each is a real button for keyboard and screen readers. */
+.theme-choice {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  padding: 0.2rem;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.theme-choice__option {
+  padding: 0.35rem 0.85rem;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.theme-choice__option--active {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+}
+
+/* Counts are links to the people behind them, so they sit beside their button
+   rather than inside it (a link cannot live in a button) and read as tappable. */
+/* Who is behind the counts, on the post you opened: sits above the icons, quiet as
+   the action row, and dotted-underlined because it is a link (the same convention
+   `.thread-more` uses). Never rendered on feed cards. */
+.post__engagement {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin: 0.55rem 0 0.15rem;
+  color: var(--text-subtle);
+  font-size: 0.78rem;
+}
+
+.post__engagement-link {
+  color: var(--text-subtle);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.post__engagement-link:hover {
+  color: var(--text);
+}
+
+.post__engagement-sep {
+  /* Punctuation between numbers is text, not a rule: at --border it was 1.25:1. */
+  color: var(--text-subtle);
+}
+
+/* Engagement pages: a list of people (likes, reposts) or of quoting posts. */
+.engagement {
+  padding-top: 0.3rem;
+}
+
+.actor-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.actor-list__item {
+  border-bottom: 1px solid var(--border);
+}
+
+.actor {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.6rem;
+  row-gap: 0.05rem;
+  padding: 0.6rem 0.2rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.actor .avatar {
+  grid-row: span 2;
+}
+
+.actor__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actor__handle {
+  color: var(--text-subtle);
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

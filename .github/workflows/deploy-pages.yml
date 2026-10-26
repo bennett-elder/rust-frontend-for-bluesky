@@ -1,0 +1,91 @@
+name: Deploy to GitHub Pages
+
+# Builds the Dioxus web app and publishes it.
+#
+# One artifact, two hosting shapes: https://<owner>.github.io/<repo>/ for a fork, and a
+# custom domain served from the root. `--base-path /<repo>/` can only satisfy the first,
+# so the build rewrites index.html's asset URLs to relative (`./assets/...`) instead —
+# those resolve correctly at any depth, which is also why a fork needs no edits.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # What this deployment calls itself. Set `APP_NAME` under Settings → Variables to
+    # name a deploy without touching source; the default is the project's own name.
+    # `SITE_URL` is only needed on a custom domain — a project page's URL is derivable
+    # from the repository, a domain is not.
+    env:
+      APP_NAME: ${{ vars.APP_NAME || 'Rusty' }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      # `off` (default) | `both` | `oauth`. A build input, like APP_NAME: the sign-in paths a
+      # deployment offers are a deployment decision, not a user preference. Unset or
+      # unrecognised means app passwords only, which is the path that cannot be misconfigured.
+      OAUTH_MODE: ${{ vars.OAUTH_MODE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust with wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install dx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: dioxus-cli@0.7
+
+      - name: Build web bundle
+        working-directory: app
+        run: dx build --release --platform web
+
+      # Relative asset URLs: works at /<repo>/ and at a domain root alike.
+      - name: Relativize asset paths
+        run: node scripts/relativize_dist.mjs
+
+      # OAuth client metadata. There is no app to register: the client_id is the URL of
+      # this file, so it has to name the site it is actually served from. Derived for a
+      # project page, taken from `SITE_URL` for a custom domain — get it wrong and sign-in
+      # fails server-side with an error that says nothing useful.
+      - name: Publish OAuth client metadata
+        run: |
+          SITE="${SITE_URL:-https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/}"
+          echo "SITE_RESOLVED=$SITE" >> "$GITHUB_ENV"
+          node scripts/gen_client_metadata.mjs "$SITE"
+
+      # The file is generated, so the one thing worth asserting is that it agrees with the
+      # URL it will be served from — otherwise the failure only appears at sign-in, server-side.
+      - name: Verify client metadata
+        run: |
+          node scripts/check_client_metadata.mjs "$SITE_RESOLVED" \
+            --dist target/dx/bluesky-alt-first-app/release/web/public
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          # Rename `bluesky-alt-first-app` here if you rename the crate in app/Cargo.toml.
+          path: target/dx/bluesky-alt-first-app/release/web/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

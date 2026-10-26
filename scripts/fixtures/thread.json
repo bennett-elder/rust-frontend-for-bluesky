@@ -1,0 +1,219 @@
+{
+ "thread": {
+  "$type": "app.bsky.feed.defs#threadViewPost",
+  "post": {
+   "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/root",
+   "cid": "bafyexamplecid",
+   "author": {
+    "did": "did:plc:exampleauthor",
+    "handle": "example.test",
+    "displayName": "Example Person",
+    "avatar": "https://media.example.test/avatar/example.test.jpg"
+   },
+   "record": {
+    "$type": "app.bsky.feed.post",
+    "text": "Root post mentioning @replier.test, linking https://example.com/root and #conversation",
+    "createdAt": "2026-01-02T04:00:00.000Z",
+    "facets": [
+     {
+      "index": {
+       "byteStart": 21,
+       "byteEnd": 34
+      },
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#mention",
+        "did": "did:plc:examplereplier"
+       }
+      ]
+     },
+     {
+      "index": {
+       "byteStart": 44,
+       "byteEnd": 68
+      },
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#link",
+        "uri": "https://example.com/root"
+       }
+      ]
+     },
+     {
+      "index": {
+       "byteStart": 73,
+       "byteEnd": 86
+      },
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#tag",
+        "tag": "conversation"
+       }
+      ]
+     }
+    ]
+   },
+   "indexedAt": "2026-01-02T04:00:00.000Z",
+   "replyCount": 4,
+   "repostCount": 5,
+   "likeCount": 6,
+   "quoteCount": 1,
+   "bookmarkCount": 0,
+   "labels": []
+  },
+  "replies": [
+   {
+    "$type": "app.bsky.feed.defs#threadViewPost",
+    "post": {
+     "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/first",
+     "cid": "bafyexamplecid",
+     "author": {
+      "did": "did:plc:exampleauthor",
+      "handle": "example.test",
+      "displayName": "Example Person",
+      "avatar": "https://media.example.test/avatar/example.test.jpg"
+     },
+     "record": {
+      "$type": "app.bsky.feed.post",
+      "text": "First reply",
+      "createdAt": "2026-01-02T05:00:00.000Z",
+      "reply": {
+       "root": {
+        "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/root",
+        "cid": "bafyexampleroot"
+       },
+       "parent": {
+        "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/root",
+        "cid": "bafyexampleroot"
+       }
+      }
+     },
+     "indexedAt": "2026-01-02T05:00:00.000Z",
+     "replyCount": 2,
+     "repostCount": 3,
+     "likeCount": 4,
+     "quoteCount": 1,
+     "bookmarkCount": 0,
+     "labels": []
+    }
+   },
+   {
+    "$type": "app.bsky.feed.defs#threadViewPost",
+    "post": {
+     "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/middle",
+     "cid": "bafyexamplecid",
+     "author": {
+      "did": "did:plc:exampleauthor",
+      "handle": "example.test",
+      "displayName": "Example Person",
+      "avatar": "https://media.example.test/avatar/example.test.jpg"
+     },
+     "record": {
+      "$type": "app.bsky.feed.post",
+      "text": "A nested reply",
+      "createdAt": "2026-01-02T05:00:00.000Z",
+      "reply": {
+       "root": {
+        "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/root",
+        "cid": "bafyexampleroot"
+       },
+       "parent": {
+        "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/root",
+        "cid": "bafyexampleroot"
+       }
+      }
+     },
+     "indexedAt": "2026-01-02T05:00:00.000Z",
+     "replyCount": 2,
+     "repostCount": 3,
+     "likeCount": 4,
+     "quoteCount": 1,
+     "bookmarkCount": 0,
+     "labels": []
+    },
+    "replies": [
+     {
+      "$type": "app.bsky.feed.defs#threadViewPost",
+      "post": {
+       "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/deep",
+       "cid": "bafyexamplecid",
+       "author": {
+        "did": "did:plc:exampleauthor",
+        "handle": "example.test",
+        "displayName": "Example Person",
+        "avatar": "https://media.example.test/avatar/example.test.jpg"
+       },
+       "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "A reply further down",
+        "createdAt": "2026-01-02T05:00:00.000Z",
+        "reply": {
+         "root": {
+          "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/root",
+          "cid": "bafyexampleroot"
+         },
+         "parent": {
+          "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/root",
+          "cid": "bafyexampleroot"
+         }
+        }
+       },
+       "indexedAt": "2026-01-02T05:00:00.000Z",
+       "replyCount": 2,
+       "repostCount": 3,
+       "likeCount": 4,
+       "quoteCount": 1,
+       "bookmarkCount": 0,
+       "labels": []
+      }
+     },
+     {
+      "$type": "app.bsky.feed.defs#blockedPost",
+      "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/blocked",
+      "blocked": true
+     }
+    ]
+   },
+   {
+    "$type": "app.bsky.feed.defs#threadViewPost",
+    "post": {
+     "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/second",
+     "cid": "bafyexamplecid",
+     "author": {
+      "did": "did:plc:exampleauthor",
+      "handle": "example.test",
+      "displayName": "Example Person",
+      "avatar": "https://media.example.test/avatar/example.test.jpg"
+     },
+     "record": {
+      "$type": "app.bsky.feed.post",
+      "text": "Another reply",
+      "createdAt": "2026-01-02T05:00:00.000Z",
+      "reply": {
+       "root": {
+        "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/root",
+        "cid": "bafyexampleroot"
+       },
+       "parent": {
+        "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/root",
+        "cid": "bafyexampleroot"
+       }
+      }
+     },
+     "indexedAt": "2026-01-02T05:00:00.000Z",
+     "replyCount": 2,
+     "repostCount": 3,
+     "likeCount": 4,
+     "quoteCount": 1,
+     "bookmarkCount": 0,
+     "labels": []
+    }
+   },
+   {
+    "$type": "app.bsky.feed.defs#notFoundPost",
+    "uri": "at://did:plc:exampleauthor/app.bsky.feed.post/gone",
+    "notFound": true
+   }
+  ]
+ }
+}

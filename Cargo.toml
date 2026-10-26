@@ -1,0 +1,3 @@
+[workspace]
+members = ["alt-first-core", "app"]
+resolver = "2"

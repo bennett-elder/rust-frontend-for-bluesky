@@ -1,0 +1,5 @@
+[application]
+name = "alt-first"
+
+[web.app]
+title = "Rusty"
