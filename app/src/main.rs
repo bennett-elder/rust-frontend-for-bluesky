@@ -351,27 +351,119 @@ fn newer_than(state: SessionState, stale: &Session) -> Option<Session> {
     (state.0)().filter(|current| current.refresh_jwt != stale.refresh_jwt)
 }
 
+/// Cross-tab notice that a rotation happened.
+///
+/// Refresh tokens are single-use, so two tabs that rotate at the same moment spend one token
+/// twice and the loser is refused. Its session is not dead — the winner's pair is already in
+/// storage — so the loser only needs to know that, and it must not sign the reader out.
+///
+/// Not a lock: a lock needs an election, a lease with an expiry, and a decision about what to do
+/// when the holder's tab dies mid-rotation. This only narrows the wait for a storage read that
+/// works with or without the API.
+const AUTH_CHANNEL_JS: &str = r#"
+window.__rustyAuth = window.__rustyAuth || (() => {
+  let channel = null;
+  try { channel = new BroadcastChannel('altfirst-auth'); } catch (error) {}
+  const waiters = [];
+  if (channel) {
+    channel.onmessage = (event) => {
+      const message = (event && event.data) || {};
+      // Only a finished rotation matters: it means storage holds a newer pair than this tab's.
+      if (message.type === 'rotated') {
+        for (const resolve of waiters.splice(0)) resolve(message);
+      }
+    };
+  }
+  return {
+    announce: (message) => { try { if (channel) channel.postMessage(message); } catch (error) {} },
+    next: (timeoutMs) => new Promise((resolve) => {
+      if (!channel) { resolve({ type: 'unsupported' }); return; }
+      const done = (message) => { clearTimeout(timer); resolve(message); };
+      const timer = setTimeout(() => {
+        const index = waiters.indexOf(done);
+        if (index >= 0) waiters.splice(index, 1);
+        resolve({ type: 'timeout' });
+      }, timeoutMs);
+      waiters.push(done);
+    }),
+  };
+})();
+"#;
+
+/// Install the cross-tab channel once, before any rotation can run.
+async fn install_auth_channel() {
+    let _ = document::eval(AUTH_CHANNEL_JS).recv::<String>().await;
+}
+
+/// Tell other tabs that this one is rotating, or that it has finished.
+///
+/// Best effort: without `BroadcastChannel` nothing is announced and every caller behaves as it
+/// did before, because the storage read is the actual mechanism.
+fn announce_auth(kind: &str) {
+    document::eval(&format!(
+        "window.__rustyAuth && window.__rustyAuth.announce({{ type: {} }})",
+        serde_json::to_string(kind).unwrap()
+    ));
+}
+
+/// Wait for another tab's rotation, up to `timeout_ms`. `None` on timeout or without the API.
+async fn next_auth_message(timeout_ms: u64) -> Option<serde_json::Value> {
+    let mut eval = document::eval(&format!(
+        r#"(() => {{
+            const send = (message) => dioxus.send(JSON.stringify(message));
+            if (!window.__rustyAuth) {{ send({{ type: 'unsupported' }}); return; }}
+            window.__rustyAuth.next({timeout_ms}).then(send);
+        }})()"#
+    ));
+    let raw: String = eval.recv().await.ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Adopt the pair another tab rotated to, if storage holds one this tab has not seen.
+///
+/// `None` means nobody else produced one: the grant really is dead, and the caller may sign out.
+async fn adopt_rotation(mut state: SessionState, stale: &Session) -> Option<Session> {
+    let stored = load_stored_session().await?;
+    if stored.refresh_jwt == stale.refresh_jwt {
+        return None;
+    }
+    // Already on disk — the tab that rotated persisted it, which is why this can be adopted
+    // without another token-endpoint round trip.
+    state.0.set(Some(stored.clone()));
+    Some(stored)
+}
+
 /// Rotate the pair once, publish it, and persist it.
 ///
 /// Persisting is part of rotating rather than an afterthought: refresh tokens are single-use,
 /// so a rotation that is not saved leaves the stored token dead and the next reload answers
 /// `400 invalid_grant` forever.
 ///
-/// No lock. A profile asks for `getProfile` and its `getAuthorFeed` at the same time, so a page
-/// whose token has expired can spend it twice; the second request is refused, and the `Err` arm
-/// adopts the pair the first one published. That is one wasted request on a rare page load, and
-/// never a read that falls back to the public AppView for want of a token.
-async fn rotate_session(mut state: SessionState, stale: &Session) -> Option<Session> {
+/// `refresh` already adopts a pair another tab stored (that is its first step, for a remembered
+/// session). This handles the harder case — both tabs rotate at the same instant — by waiting
+/// for the winner's announcement and reading what it saved. Returns the refresh error when
+/// nobody else rotated, so callers can tell a dead grant from a race.
+async fn rotate_session(mut state: SessionState, stale: &Session) -> Result<Session, String> {
     if let Some(fresh) = newer_than(state, stale) {
-        return Some(fresh);
+        return Ok(fresh);
     }
+    announce_auth("rotating");
     match refresh(stale).await {
         Ok(fresh) => {
             state.0.set(Some(fresh.clone()));
             persist_session(Some(&fresh), fresh.remembered);
-            Some(fresh)
+            // Announced after persisting, so a tab that adopts on this message cannot read the
+            // pair it was already holding.
+            announce_auth("rotated");
+            Ok(fresh)
         }
-        Err(_) => newer_than(state, stale),
+        Err(error) => {
+            let _ = next_auth_message(1500).await;
+            match adopt_rotation(state, stale).await {
+                Some(fresh) => Ok(fresh),
+                None => Err(error),
+            }
+        }
     }
 }
 
@@ -401,8 +493,8 @@ async fn authed_get<T: serde::de::DeserializeOwned>(
                 return Err(original);
             }
             match rotate_session(state, &existing).await {
-                Some(fresh) => authed_get_with::<T>(path, &fresh).await,
-                None => Err(original),
+                Ok(fresh) => authed_get_with::<T>(path, &fresh).await,
+                Err(_) => Err(original),
             }
         }
     }
@@ -1885,10 +1977,10 @@ fn toggle_reaction(
         // rotation must be saved — see the feed path for why.
         if let Err(error) = &result {
             if error.contains("HTTP 401") {
-                match refresh(&signed).await {
+                // Same one rotation path as feeds and reads — including its cross-tab handling,
+                // so a like in two tabs cannot sign the loser out.
+                match rotate_session(session_state, &signed).await {
                     Ok(fresh) => {
-                        session_state.0.set(Some(fresh.clone()));
-                        persist_session(Some(&fresh), fresh.remembered);
                         signed = fresh;
                         result = send_reaction(&signed, reaction, &target, &cid, previous.clone(), next)
                             .await;
@@ -3306,6 +3398,9 @@ fn App() -> Element {
         if sign_in_mode().offers_oauth() && OAUTH_IMPLEMENTED {
             spawn(oauth_flow::install_dpop());
         }
+        // Not OAuth-only: app-password sessions rotate too, and two tabs rotating at the same
+        // moment is what used to sign one of them out.
+        spawn(install_auth_channel());
     });
 
     let mut session = use_context_provider(|| SessionState(Signal::new(None)));
@@ -3521,13 +3616,11 @@ fn App() -> Element {
             // surfacing a bare 401.
             if let (Err(error), Some(existing)) = (&result, current.clone()) {
                 if error.contains("HTTP 401") {
-                    match refresh(&existing).await {
+                    // One implementation of "rotate", shared with reads and reactions, so the
+                    // cross-tab race is handled once: a tab whose token another tab just spent
+                    // adopts that pair instead of reporting a dead grant.
+                    match rotate_session(session, &existing).await {
                         Ok(fresh) => {
-                            // Persist on *every* rotation: refresh tokens are single-use, so a
-                            // rotation that is not saved leaves the stored token dead and the
-                            // next reload answers 400 forever.
-                            session.0.set(Some(fresh.clone()));
-                            persist_session(Some(&fresh), fresh.remembered);
                             current = Some(fresh);
                             result = fetch_feed(source, current, None, session).await;
                         }
