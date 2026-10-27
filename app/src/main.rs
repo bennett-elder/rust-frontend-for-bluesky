@@ -345,6 +345,84 @@ async fn refresh(session: &Session) -> Result<Session, String> {
     })
 }
 
+/// The session in the signal, when it is no longer the one that just 401'd — another read, or
+/// another tab through `refresh`'s storage check, may already have replaced it.
+fn newer_than(state: SessionState, stale: &Session) -> Option<Session> {
+    (state.0)().filter(|current| current.refresh_jwt != stale.refresh_jwt)
+}
+
+/// Rotate the pair once, publish it, and persist it.
+///
+/// Persisting is part of rotating rather than an afterthought: refresh tokens are single-use,
+/// so a rotation that is not saved leaves the stored token dead and the next reload answers
+/// `400 invalid_grant` forever.
+///
+/// No lock. A profile asks for `getProfile` and its `getAuthorFeed` at the same time, so a page
+/// whose token has expired can spend it twice; the second request is refused, and the `Err` arm
+/// adopts the pair the first one published. That is one wasted request on a rare page load, and
+/// never a read that falls back to the public AppView for want of a token.
+async fn rotate_session(mut state: SessionState, stale: &Session) -> Option<Session> {
+    if let Some(fresh) = newer_than(state, stale) {
+        return Some(fresh);
+    }
+    match refresh(stale).await {
+        Ok(fresh) => {
+            state.0.set(Some(fresh.clone()));
+            persist_session(Some(&fresh), fresh.remembered);
+            Some(fresh)
+        }
+        Err(_) => newer_than(state, stale),
+    }
+}
+
+/// One authenticated GET against the account's PDS, rotating an expired access token once.
+///
+/// Reads used to skip this. The restore path deliberately does not rotate on load — it cost a
+/// round trip per reload, invalidated the DPoP nonce cached for the old token, and raced other
+/// tabs for a single-use refresh token — on the promise that "a request that needs a new token
+/// still refreshes on its own 401". Feed loads and likes kept that promise; reads did not. So a
+/// session older than the ~2 h access-token lifetime answered 401 on the first PDS read after a
+/// reload, `viewer_read` fell back to the public AppView, and that answers `viewer: null`:
+/// hearts read as unliked, and tapping one created a *second* like record.
+///
+/// A failed rotation is reported, never acted on: signing the reader out is a decision for a
+/// write or a feed load, not for a background read.
+async fn authed_get<T: serde::de::DeserializeOwned>(
+    path: &str,
+    state: SessionState,
+) -> Result<T, String> {
+    let Some(existing) = (state.0)() else {
+        return Err("Sign in to read this".into());
+    };
+    match authed_get_with::<T>(path, &existing).await {
+        Ok(value) => Ok(value),
+        Err(original) => {
+            if !original.contains("HTTP 401") {
+                return Err(original);
+            }
+            match rotate_session(state, &existing).await {
+                Some(fresh) => authed_get_with::<T>(path, &fresh).await,
+                None => Err(original),
+            }
+        }
+    }
+}
+
+/// The bare authenticated GET, shared by the first attempt and the retry so the two cannot
+/// drift in URL shape or in which header carries the token.
+async fn authed_get_with<T: serde::de::DeserializeOwned>(
+    path: &str,
+    session: &Session,
+) -> Result<T, String> {
+    request_json(
+        "GET",
+        &format!("{}{path}", session.pds),
+        session.auth(),
+        None,
+    )
+    .await
+}
+
 /// Discover is public; Following requires a session. Every other tab comes from
 /// the account's saved feeds — no one's personal feed is baked in here.
 const DISCOVER_FEED: &str =
@@ -1123,12 +1201,13 @@ struct FeedCache {
 async fn revalidate_feed(
     source: FeedSource,
     session: Option<Session>,
+    state: SessionState,
     known: std::collections::HashSet<String>,
     generation: u64,
     feed_generation: Signal<u64>,
     mut feed_pending: Signal<Option<PendingRefresh>>,
 ) {
-    let Ok(response) = fetch_feed(source, session, None).await else {
+    let Ok(response) = fetch_feed(source, session, None, state).await else {
         // A failed background check is not worth interrupting reading.
         return;
     };
@@ -1210,6 +1289,7 @@ async fn fetch_feed(
     source: FeedSource,
     session: Option<Session>,
     cursor: Option<&str>,
+    state: SessionState,
 ) -> Result<FeedResponse, String> {
     let cursor_param = cursor
         .map(|cursor| format!("&cursor={}", encode_uri(cursor)))
@@ -1218,7 +1298,7 @@ async fn fetch_feed(
     match source {
         // Author feeds stay single-page for now; the profile view is the only
         // caller and it already shows a full first page.
-        FeedSource::Author(handle) => fetch_author_feed(&handle, session.as_ref()).await,
+        FeedSource::Author(handle) => fetch_author_feed(&handle, state).await,
         FeedSource::Custom { uri, .. } => {
             // Personalized generators (Discover above all) need the viewer context
             // that only the PDS can attach, so prefer it when signed in.
@@ -1680,14 +1760,11 @@ fn apply_block(
 
 
 
-async fn fetch_saved_feeds(session: &Session) -> Result<Vec<(String, String)>, String> {
-    let prefs: PreferencesResponse = request_json(
-        "GET",
-        &format!("{}/xrpc/app.bsky.actor.getPreferences", session.pds),
-        session.auth(),
-        None,
-    )
-    .await?;
+async fn fetch_saved_feeds(state: SessionState) -> Result<Vec<(String, String)>, String> {
+    // Rotating here matters as much as on a profile: this is the first authenticated call the
+    // restore path makes, so a stale access token used to quietly empty the Feeds page.
+    let prefs: PreferencesResponse =
+        authed_get("/xrpc/app.bsky.actor.getPreferences", state).await?;
 
     let uris = prefs.saved_feed_uris();
     if uris.is_empty() {
@@ -1731,24 +1808,19 @@ async fn fetch_saved_feeds(session: &Session) -> Result<Vec<(String, String)>, S
 /// Signed in, the request goes to the PDS with the access token, because that is
 /// the service that fills `viewer.like` (the public AppView answers `null` for it,
 /// which makes an already-liked post look unliked — and tapping the heart there
-/// creates a second like record). If that request fails for any reason, the read
-/// falls back to the public AppView: losing the hearts is a small price, turning a
-/// thread into an error panel because of viewer plumbing is not.
+/// creates a second like record). An expired token is rotated *first*, so the fallback
+/// below is for a read that genuinely cannot be authenticated rather than one that merely
+/// aged out. If it still fails, the read falls back to the public AppView: losing the
+/// hearts is a small price, turning a thread into an error panel because of viewer plumbing
+/// is not.
 async fn viewer_read<T: serde::de::DeserializeOwned>(
     path: &str,
-    session: Option<&Session>,
+    state: SessionState,
 ) -> Result<T, String> {
-    let Some(existing) = session else {
+    if (state.0)().is_none() {
         return request_json("GET", &format!("{PUBLIC_API}{path}"), None, None).await;
-    };
-    let authenticated = request_json(
-        "GET",
-        &format!("{}{path}", existing.pds),
-        existing.auth(),
-        None,
-    )
-    .await;
-    match authenticated {
+    }
+    match authed_get::<T>(path, state).await {
         Ok(value) => Ok(value),
         Err(original) => request_json("GET", &format!("{PUBLIC_API}{path}"), None, None)
             .await
@@ -1909,13 +1981,34 @@ async fn fetch_trending() -> Result<TrendingTopicsResponse, String> {
     .await
 }
 
-async fn fetch_profile(actor: &str, session: Option<&Session>) -> Result<ProfileViewDetailed, String> {
+async fn fetch_profile(
+    actor: &str,
+    state: SessionState,
+) -> Result<ProfileViewDetailed, String> {
     viewer_read(
         &format!(
             "/xrpc/app.bsky.actor.getProfile?actor={}",
             encode_uri(actor)
         ),
-        session,
+        state,
+    )
+    .await
+}
+
+/// The same profile, read publicly on purpose.
+///
+/// The account menu wants one field (the avatar URL) and needs no viewer state, so this skips
+/// the token, the DPoP proof and the 401 that an authenticated read on Explore used to put in
+/// the console for a URL the public AppView hands out anyway.
+async fn fetch_public_profile(actor: &str) -> Result<ProfileViewDetailed, String> {
+    request_json(
+        "GET",
+        &format!(
+            "{PUBLIC_API}/xrpc/app.bsky.actor.getProfile?actor={}",
+            encode_uri(actor)
+        ),
+        None,
+        None,
     )
     .await
 }
@@ -1927,10 +2020,13 @@ async fn fetch_profile(actor: &str, session: Option<&Session>) -> Result<Profile
 /// hides text-only posts — and on Bluesky those are where mentions and links
 /// (facets) concentrate. Media-richness is a property of the data, not a query
 /// the client should impose.
-async fn fetch_author_feed(actor: &str, session: Option<&Session>) -> Result<FeedResponse, String> {
+async fn fetch_author_feed(
+    actor: &str,
+    state: SessionState,
+) -> Result<FeedResponse, String> {
     viewer_read(
-        &format!("/xrpc/app.bsky.feed.getAuthorFeed?actor={actor}&limit=30"),
-        session,
+        &format!("/xrpc/app.bsky.feed.getAuthorFeed?actor={}&limit=30", encode_uri(actor)),
+        state,
     )
     .await
 }
@@ -1940,11 +2036,11 @@ async fn fetch_author_feed(actor: &str, session: Option<&Session>) -> Result<Fee
 /// The session is not optional decoration: without it the AppView fills
 /// `viewer.like` with null, so a post you already liked renders unliked here and
 /// tapping the heart creates a *second* like record instead of removing the first.
-async fn fetch_thread(uri: &str, session: Option<&Session>) -> Result<PostThreadResponse, String> {
+async fn fetch_thread(uri: &str, state: SessionState) -> Result<PostThreadResponse, String> {
     let encoded = uri.replace(':', "%3A").replace('/', "%2F").replace('#', "%23");
     viewer_read(
         &format!("/xrpc/app.bsky.feed.getPostThread?uri={encoded}&depth=4&parentHeight=2"),
-        session,
+        state,
     )
     .await
 }
@@ -2526,14 +2622,14 @@ enum EngagementList {
 async fn fetch_engagement(
     uri: &str,
     kind: Engagement,
-    session: Option<&Session>,
+    state: SessionState,
 ) -> Result<EngagementList, String> {
     let encoded = encode_uri(uri);
     match kind {
         Engagement::Likes => {
             let response: LikesResponse = viewer_read(
                 &format!("/xrpc/app.bsky.feed.getLikes?uri={encoded}&limit=50"),
-                session,
+                state,
             )
             .await?;
             Ok(EngagementList::Actors(
@@ -2543,7 +2639,7 @@ async fn fetch_engagement(
         Engagement::Reposts => {
             let response: RepostedByResponse = viewer_read(
                 &format!("/xrpc/app.bsky.feed.getRepostedBy?uri={encoded}&limit=50"),
-                session,
+                state,
             )
             .await?;
             Ok(EngagementList::Actors(response.reposted_by))
@@ -2551,7 +2647,7 @@ async fn fetch_engagement(
         Engagement::Quotes => {
             let response: QuotesResponse = viewer_read(
                 &format!("/xrpc/app.bsky.feed.getQuotes?uri={encoded}&limit=50"),
-                session,
+                state,
             )
             .await?;
             Ok(EngagementList::Posts(response.posts))
@@ -2566,8 +2662,7 @@ fn EngagementView(route: Signal<Route>) -> Element {
     let session_state = use_context::<SessionState>();
     let mut list = use_resource(move || {
         let (uri, kind) = engagement_target(&route());
-        let session = (session_state.0)();
-        async move { fetch_engagement(&uri, kind, session.as_ref()).await }
+        async move { fetch_engagement(&uri, kind, session_state).await }
     });
     let (_, kind) = engagement_target(&route());
     let heading = match kind {
@@ -3305,7 +3400,7 @@ fn App() -> Element {
                     remembered: completed.remember,
                 };
                 session.0.set(Some(fresh.clone()));
-                if let Ok(feeds) = fetch_saved_feeds(&fresh).await {
+                if let Ok(feeds) = fetch_saved_feeds(session).await {
                     saved_feeds.set(feeds);
                 }
                 persist_session(Some(&fresh), completed.remember);
@@ -3332,9 +3427,10 @@ fn App() -> Element {
                     // cost a token-endpoint round trip per reload, invalidated the DPoP nonce
                     // cached for the old token — a guaranteed `401` on the first PDS call of
                     // every load — and raced other tabs for a single-use refresh token. A
-                    // request that needs a new token still refreshes on its own 401.
+                    // request that needs a new token still refreshes on its own 401 — reads
+                    // included, through `authed_get`.
                     session.0.set(Some(stored.clone()));
-                    if let Ok(feeds) = fetch_saved_feeds(&stored).await {
+                    if let Ok(feeds) = fetch_saved_feeds(session).await {
                         saved_feeds.set(feeds);
                     }
                 }
@@ -3407,6 +3503,7 @@ fn App() -> Element {
             spawn(revalidate_feed(
                 source,
                 current,
+                session,
                 known,
                 generation,
                 feed_generation,
@@ -3419,7 +3516,7 @@ fn App() -> Element {
         feed_loading.set(true);
         spawn(async move {
             let mut current = current;
-            let mut result = fetch_feed(source.clone(), current.clone(), None).await;
+            let mut result = fetch_feed(source.clone(), current.clone(), None, session).await;
             // Access tokens expire in ~2 h; rotate and retry once instead of
             // surfacing a bare 401.
             if let (Err(error), Some(existing)) = (&result, current.clone()) {
@@ -3432,7 +3529,7 @@ fn App() -> Element {
                             session.0.set(Some(fresh.clone()));
                             persist_session(Some(&fresh), fresh.remembered);
                             current = Some(fresh);
-                            result = fetch_feed(source, current, None).await;
+                            result = fetch_feed(source, current, None, session).await;
                         }
                         Err(refresh_error) => {
                             log_to_console(&format!("refresh failed: {refresh_error}"));
@@ -3747,6 +3844,7 @@ fn App() -> Element {
                             spawn(revalidate_feed(
                                 source,
                                 (session.0)(),
+                                session,
                                 known,
                                 *feed_generation.peek(),
                                 feed_generation,
@@ -3815,7 +3913,7 @@ fn App() -> Element {
                                 let key = source.key();
                                 feed_loading.set(true);
                                 spawn(async move {
-                                    match fetch_feed(source, current, Some(&cursor)).await {
+                                    match fetch_feed(source, current, Some(&cursor), session).await {
                                         Ok(response) => {
                                             if *feed_generation.peek() != generation {
                                                 return;
@@ -3908,8 +4006,7 @@ fn ThreadView(route: Signal<Route>) -> Element {
             Route::Post { uri } => uri,
             _ => String::new(),
         };
-        let session = (session_state.0)();
-        async move { fetch_thread(&uri, session.as_ref()).await }
+        async move { fetch_thread(&uri, session_state).await }
     });
     // The reply box. Kept on the thread view rather than in `ThreadNode`: one box per
     // page, answering the post that was opened.
@@ -4199,12 +4296,12 @@ fn PostMenu(handle: String, did: String, uri: String, text: String) -> Element {
                     if !next || !signed_in {
                         return;
                     }
-                    let Some(signed) = (session_state.0)() else {
+                    if (session_state.0)().is_none() {
                         return;
-                    };
+                    }
                     let handle = handle.clone();
                     spawn(async move {
-                        if let Ok(profile) = fetch_profile(&handle, Some(&signed)).await {
+                        if let Ok(profile) = fetch_profile(&handle, session_state).await {
                             viewer.set(profile.viewer);
                         }
                     });
@@ -4550,7 +4647,7 @@ fn AccountMenu(handle: String, did: String, on_sign_out: EventHandler<()>) -> El
             // state. It was also the only authenticated PDS call on Explore, so it paid the
             // DPoP nonce handshake by itself and put a `401` in the console on every load of
             // the home page — for an image URL the public AppView hands out anyway.
-            if let Ok(profile) = fetch_profile(&handle, None).await {
+            if let Ok(profile) = fetch_public_profile(&handle).await {
                 avatar.set(profile.avatar);
             }
         });
@@ -4809,10 +4906,10 @@ async fn remember_parents(posts: &[PostView], mut parents: Signal<std::collectio
     }
 }
 
-async fn fetch_notifications(session: &Session) -> Result<NotificationsResponse, String> {
+async fn fetch_notifications(state: SessionState) -> Result<NotificationsResponse, String> {
     viewer_read(
         "/xrpc/app.bsky.notification.listNotifications?limit=50",
-        Some(session),
+        state,
     )
     .await
 }
@@ -4931,7 +5028,7 @@ fn SignInView() -> Element {
                                 session.0.set(Some(signed.clone()));
                                 persist_session(Some(&signed), signed.remembered);
                                 password.set(String::new());
-                                if let Ok(list) = fetch_saved_feeds(&signed).await {
+                                if let Ok(list) = fetch_saved_feeds(session).await {
                                     feeds.set(list);
                                 }
                                 navigate("#/");
@@ -4989,9 +5086,8 @@ fn SignInView() -> Element {
 #[component]
 fn NotificationsView() -> Element {
     let session_state = use_context::<SessionState>();
-    let session = (session_state.0)();
 
-    let Some(signed) = session.clone() else {
+    if (session_state.0)().is_none() {
         return rsx! {
             section { class: "notifications",
                 h2 { class: "page-title", "Notifications" }
@@ -5004,12 +5100,9 @@ fn NotificationsView() -> Element {
                 }
             }
         };
-    };
+    }
 
-    let mut list = use_resource(move || {
-        let signed = signed.clone();
-        async move { fetch_notifications(&signed).await }
-    });
+    let mut list = use_resource(move || async move { fetch_notifications(session_state).await });
 
     rsx! {
         section { class: "notifications",
@@ -5246,8 +5339,7 @@ fn ProfileView(route: Signal<Route>) -> Element {
     let session_state = use_context::<SessionState>();
     let mut profile = use_resource(move || {
         let actor = current_actor();
-        let session = (session_state.0)();
-        async move { fetch_profile(&actor, session.as_ref()).await }
+        async move { fetch_profile(&actor, session_state).await }
     });
     let parent_handles_signal = use_context::<ParentHandles>().0;
     // Optimistic overrides for mute/block, so the button flips immediately instead of
@@ -5313,9 +5405,8 @@ fn ProfileView(route: Signal<Route>) -> Element {
 
     let mut posts = use_resource(move || {
         let actor = current_actor();
-        let session = (session_state.0)();
         async move {
-            let result = fetch_author_feed(&actor, session.as_ref()).await;
+            let result = fetch_author_feed(&actor, session_state).await;
             if let Ok(response) = &result {
                 let posts: Vec<PostView> = response
                     .feed
