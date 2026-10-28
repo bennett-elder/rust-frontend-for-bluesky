@@ -3905,14 +3905,6 @@ fn App() -> Element {
                     span { "Feeds" }
                 }
                 div { class: "rail__bottom",
-                    if signed_handle.is_some() {
-                        a {
-                            class: if matches!(current_route, Route::Compose) { "rail__item rail__item--active" } else { "rail__item" },
-                            href: "#/compose",
-                            {action_icon("compose")}
-                            span { "New post" }
-                        }
-                    }
                     if let Some(handle) = signed_handle.clone() {
                         a {
                             class: if matches!(&current_route, Route::Profile { actor } if actor == &handle) { "rail__item rail__item--active" } else { "rail__item" },
@@ -3927,6 +3919,16 @@ fn App() -> Element {
                         aria_label: "Settings",
                         {action_icon("settings")}
                         span { "Settings" }
+                    }
+                    // Below the account and Settings, not above them: the rail's top half is
+                    // where you go, and the bottom is where you act.
+                    if signed_handle.is_some() {
+                        a {
+                            class: if matches!(current_route, Route::Compose) { "rail__item rail__item--active" } else { "rail__item" },
+                            href: "#/compose",
+                            {action_icon("compose")}
+                            span { "New post" }
+                        }
                     }
                 }
             }
