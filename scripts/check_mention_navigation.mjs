@@ -114,6 +114,21 @@ ws.onmessage = (event) => {
   if (message.id && pending.has(message.id)) {
     pending.get(message.id)(message);
     pending.delete(message.id);
+    return;
+  }
+  // The hashtag page searches the public AppView; answer it with one post.
+  if (message.method === 'Fetch.requestPaused') {
+    send('Fetch.fulfillRequest', {
+      requestId: message.params.requestId,
+      responseCode: 200,
+      responseHeaders: [
+        { name: 'content-type', value: 'application/json' },
+        { name: 'access-control-allow-origin', value: '*' },
+      ],
+      body: Buffer.from(
+        JSON.stringify({ posts: [feed.feed[0].post] }),
+      ).toString('base64'),
+    });
   }
 };
 await new Promise((resolve) => (ws.onopen = resolve));
@@ -138,6 +153,7 @@ const run = async (expression) => {
 await send('Runtime.enable');
 await send('Page.enable');
 await send('Network.setCacheDisabled', { cacheDisabled: true });
+await send('Fetch.enable', { patterns: [{ urlPattern: '*searchPosts*' }] });
 
 await send('Page.navigate', { url: 'about:blank' });
 await wait(300);
@@ -168,6 +184,7 @@ const anchors = await run(`[...document.querySelectorAll('.post__text a')].map((
 const mention = anchors.find((a) => a.cls.includes('facet--mention'));
 const appProfile = anchors.find((a) => a.text.includes('bsky.app/profile/bluesky.test'));
 const external = anchors.find((a) => a.text.includes('example.com/root'));
+const tag = anchors.find((a) => a.cls.includes('facet--tag'));
 
 const failures = [];
 if (!mention) failures.push('no mention anchor rendered');
@@ -184,6 +201,12 @@ if (external && (external.target !== '_blank' || !external.href.startsWith('http
   failures.push(`the ordinary link became ${external.href} (target ${external.target})`);
 }
 
+if (!tag) failures.push('the hashtag did not render as a link');
+if (tag && tag.href !== '#/tag/conversation') {
+  failures.push(`the hashtag links to ${tag.href} instead of its page`);
+}
+if (tag && tag.target) failures.push(`the hashtag still opens a ${tag.target} tab`);
+
 // Click the mention: the route must change in place, on this origin.
 await run(`document.querySelector('.facet--mention').click()`);
 for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -198,6 +221,20 @@ if (!decodeURIComponent(String(after.hash)).includes('did:plc:examplereplier')) 
   failures.push(`the profile route lost the DID: ${after.hash}`);
 }
 
+await run(`history.back()`);
+await wait(1200);
+await run(`document.querySelector('.facet--tag').click()`);
+let tagPage = null;
+for (let attempt = 0; attempt < 30; attempt += 1) {
+  tagPage = await run(`({ hash: location.hash, posts: document.querySelectorAll('.post').length, title: document.querySelector('.page-title')?.textContent ?? null })`);
+  if (String(tagPage.hash).startsWith('#/tag/') && tagPage.posts > 0) break;
+  await wait(300);
+}
+if (!String(tagPage?.hash).startsWith('#/tag/conversation')) {
+  failures.push(`the hashtag page is at ${tagPage?.hash}`);
+}
+if (!tagPage?.posts) failures.push('the hashtag page rendered no posts');
+
 await run(
   original === null
     ? `localStorage.removeItem('altfirst.session')`
@@ -207,5 +244,5 @@ await send('Page.navigate', { url: app });
 ws.close();
 stub.close();
 
-console.log(JSON.stringify({ anchors, after, failures }, null, 2));
+console.log(JSON.stringify({ anchors, after, tagPage, failures }, null, 2));
 if (failures.length > 0) process.exitCode = 1;

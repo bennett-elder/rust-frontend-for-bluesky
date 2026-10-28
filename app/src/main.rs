@@ -550,6 +550,8 @@ enum Route {
     Settings,
     /// Writing a new top-level post, on its own page.
     Compose,
+    /// Everything posted with one hashtag: `#/tag/<tag>`.
+    Hashtag { tag: String },
     /// The way in: app password or OAuth, on their own page rather than in the header.
     SignIn,
     Feed { uri: String },
@@ -575,6 +577,9 @@ fn parse_hash(hash: &str) -> Route {
         "notifications" => Route::Notifications,
         "settings" => Route::Settings,
         "compose" => Route::Compose,
+        "tag" if !rest.is_empty() => Route::Hashtag {
+            tag: decode_hash_value(rest),
+        },
         "sign-in" => Route::SignIn,
         "feed" if !rest.is_empty() => Route::Feed {
             uri: decode_hash_value(rest),
@@ -617,6 +622,7 @@ fn route_hash(route: &Route) -> String {
         Route::Notifications => "#/notifications".to_string(),
         Route::Settings => "#/settings".to_string(),
         Route::Compose => "#/compose".to_string(),
+        Route::Hashtag { tag } => format!("#/tag/{}", encode_uri(tag)),
         Route::SignIn => "#/sign-in".to_string(),
         Route::Feed { uri } => format!("#/feed/{}", encode_uri(uri)),
         Route::Profile { actor } => format!("#/profile/{}", encode_uri(actor)),
@@ -1199,6 +1205,7 @@ fn route_key(route: &Route) -> String {
         Route::Notifications => "notifications".to_string(),
         Route::Settings => "settings".to_string(),
         Route::Compose => "compose".to_string(),
+        Route::Hashtag { tag } => format!("tag:{tag}"),
         Route::SignIn => "sign-in".to_string(),
         Route::Feed { uri } => format!("custom:{uri}"),
         Route::Profile { actor } => format!("profile:{actor}"),
@@ -1302,6 +1309,7 @@ fn update_title(route: &Route, label: &str) {
         Route::Notifications => TitleSubject::Notifications,
         Route::Settings => TitleSubject::Settings,
         Route::Compose => TitleSubject::Compose,
+        Route::Hashtag { tag } => TitleSubject::Hashtag { tag: tag.clone() }, 
         Route::SignIn => TitleSubject::SignIn,
         Route::Profile { actor } => TitleSubject::Profile { handle: actor },
         Route::Post { .. } => TitleSubject::Post,
@@ -1357,7 +1365,8 @@ fn source_for(route: &Route, saved: &[(String, String)]) -> Option<FeedSource> {
         | Route::Settings
         | Route::SignIn
         | Route::Notifications
-        | Route::Compose => None,
+        | Route::Compose
+        | Route::Hashtag { .. } => None,
     }
 }
 
@@ -1885,7 +1894,18 @@ async fn attach_facets(record: &mut serde_json::Value, text: &str) {
             });
         }
     }
-    // Mentions and links are found separately; a post can contain both, in either order.
+    for candidate in alt_first_core::tag_candidates(text) {
+        facets.push(Facet {
+            index: ByteRange {
+                byte_start: candidate.byte_start,
+                byte_end: candidate.byte_end,
+            },
+            features: vec![FacetFeature::Tag {
+                tag: candidate.tag,
+            }],
+        });
+    }
+    // Mentions, links and tags are found separately; a post can contain all three in any order.
     facets.sort_by_key(|facet| facet.index.byte_start);
     if !facets.is_empty() {
         if let Ok(value) = serde_json::to_value(&facets) {
@@ -2777,9 +2797,7 @@ fn render_segment(segment: OwnedSegment) -> Element {
         OwnedSegment::Tag { text, tag } => rsx! {
             a {
                 class: "facet facet--tag",
-                href: "https://bsky.app/hashtag/{tag}",
-                target: "_blank",
-                rel: "noreferrer",
+                href: "#/tag/{encode_uri(&tag)}",
                 "{text}"
             }
         },
@@ -3120,7 +3138,7 @@ fn ComposeView() -> Element {
             }
             p { class: "note",
                 "Text only for now. Images would need alt text to be required, which is a \
-                 separate decision. Links are linked; mentions are not resolved yet."
+                 separate decision. Links, mentions and hashtags are linked."
             }
         }
     }
@@ -3961,6 +3979,7 @@ fn App() -> Element {
         | Route::Feeds
         | Route::Settings
         | Route::Compose
+        | Route::Hashtag { .. }
         | Route::Notifications => String::new(),
         feed => route_hash(&feed),
     };
@@ -4231,6 +4250,7 @@ fn App() -> Element {
                 Route::Notifications => rsx! { NotificationsView {} },
                 Route::Settings => rsx! { SettingsView {} },
                 Route::Compose => rsx! { ComposeView {} },
+                Route::Hashtag { .. } => rsx! { HashtagView { route: route } },
 
                 // These views read the route signal themselves: a plain prop captured
                 // inside `use_resource` never re-runs, so navigating reply-to-reply
@@ -5662,7 +5682,70 @@ fn start_search(
     });
 }
 
-/// Explore: a search field, and trending stories when nothing has been searched.
+/// Everything posted with one hashtag, as a page of its own.
+///
+/// `#tag` used to open `bsky.app/hashtag/<tag>` in a new tab — the same "internal-looking link
+/// leaves the client" problem mentions had. The search behind it is the one Explore already
+/// uses, so this is a destination without a new backend.
+#[component]
+fn HashtagView(route: Signal<Route>) -> Element {
+    let parent_handles = use_context::<ParentHandles>().0;
+    let mut results = use_resource(move || {
+        let tag = match route() {
+            Route::Hashtag { tag } => tag,
+            _ => String::new(),
+        };
+        async move {
+            let found = search_posts(&format!("#{tag}")).await;
+            // Results are list cards too, so they get the "Replying to" line like a feed.
+            if let Ok(response) = &found {
+                remember_parents(&response.posts, parent_handles).await;
+            }
+            found
+        }
+    });
+
+    let tag = match route() {
+        Route::Hashtag { tag } => tag,
+        _ => String::new(),
+    };
+    let origin = format!("#/tag/{}", encode_uri(&tag));
+
+    rsx! {
+        section { class: "hashtag",
+            button {
+                r#type: "button",
+                class: "thread__back",
+                onclick: move |_| go_back(),
+                "← Back"
+            }
+            h2 { class: "page-title", "#{tag}" }
+            {match &*results.read() {
+                None => rsx! { p { class: "note", "Searching…" } },
+                Some(Err(error)) => rsx! {
+                    ErrorPanel {
+                        message: error.clone(),
+                        subject: Subject::Feed,
+                        on_retry: move |_| results.restart(),
+                    }
+                },
+                Some(Ok(response)) => {
+                    if response.posts.is_empty() {
+                        rsx! { p { class: "note", "No posts with this hashtag yet." } }
+                    } else {
+                        rsx! {
+                            for post in response.posts.clone() {
+                                PostCard { post: post, origin: origin.clone() }
+                            }
+                        }
+                    }
+                }
+            }}
+        }
+    }
+}
+
+
 ///
 /// `#/` is this page rather than a feed — the trending generator it used to point at
 /// keeps its own `#/feed/<uri>` route, which is where the topics below lead.

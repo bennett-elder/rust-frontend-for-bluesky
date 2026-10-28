@@ -393,6 +393,56 @@ fn is_handle_shaped(handle: &str) -> bool {
     tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic())
 }
 
+/// A hashtag found in text, with the byte range it occupies — `#` included.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagCandidate {
+    pub byte_start: usize,
+    pub byte_end: usize,
+    pub tag: String,
+}
+
+/// `#tag` occurrences that can become tag facets.
+///
+/// atproto stores the tag **without** the `#`, while the range covers it, so the two differ on
+/// purpose. A `#` inside a word is not a tag (`C#`, `foo#bar`), and neither is a bare `#` or one
+/// made only of digits — that is a number. Hyphens end a tag: `#rust-lang` links `#rust`, which
+/// is what the reader can actually follow.
+pub fn tag_candidates(text: &str) -> Vec<TagCandidate> {
+    let mut found = Vec::new();
+
+    for (index, _) in text.match_indices('#') {
+        if let Some(prev) = text[..index].chars().next_back() {
+            if prev.is_alphanumeric() || matches!(prev, '#' | '&' | '_') {
+                continue;
+            }
+        }
+
+        let mut end = index + 1;
+        for (offset, ch) in text[end..].char_indices() {
+            if ch.is_alphanumeric() || ch == '_' {
+                end = index + 1 + offset + ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if end == index + 1 {
+            continue;
+        }
+
+        let tag = &text[index + 1..end];
+        if tag.chars().all(|ch| ch.is_ascii_digit()) {
+            continue;
+        }
+        found.push(TagCandidate {
+            byte_start: index,
+            byte_end: end,
+            tag: tag.to_string(),
+        });
+    }
+
+    found
+}
+
 /// A piece of post text with an optional annotation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextSegment<'a> {
@@ -1045,6 +1095,8 @@ pub enum TitleSubject<'a> {
     Feeds,
     Settings,
     Compose,
+    /// Everything posted with one hashtag, titled `#tag`.
+    Hashtag { tag: String },
     Explore,
     Notifications,
     Engagement { label: &'a str },
@@ -1063,6 +1115,7 @@ pub fn tab_title(subject: TitleSubject<'_>, app: &str) -> String {
         TitleSubject::Feeds => format!("Feeds — {app}"),
         TitleSubject::Settings => format!("Settings — {app}"),
         TitleSubject::Compose => format!("New post — {app}"),
+        TitleSubject::Hashtag { tag } => format!("#{tag} — {app}"),
         TitleSubject::Explore => format!("Explore — {app}"),
         TitleSubject::Notifications => format!("Notifications — {app}"),
         TitleSubject::Engagement { label } => format!("{label} — {app}"),
@@ -2291,6 +2344,43 @@ mod facet_tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].byte_start, text.find('@').unwrap());
         assert_eq!(found[0].byte_start, 8); // 🙂 is 4 bytes, then " cc " is 4
+    }
+
+    #[test]
+    fn tag_candidates_cover_the_hash_but_store_the_bare_tag() {
+        let text = "talking about #rust today";
+        let found = tag_candidates(text);
+        assert_eq!(found.len(), 1);
+        assert_eq!(&text[found[0].byte_start..found[0].byte_end], "#rust");
+        assert_eq!(found[0].tag, "rust");
+    }
+
+    #[test]
+    fn tag_candidates_reject_numbers_and_embedded_hashes() {
+        assert!(tag_candidates("#123").is_empty());
+        assert!(tag_candidates("C# is a language").is_empty());
+        assert!(tag_candidates("foo#bar").is_empty());
+        assert!(tag_candidates("a bare # sign").is_empty());
+        assert!(tag_candidates("##nested").is_empty());
+    }
+
+    #[test]
+    fn tag_candidates_end_at_a_hyphen_or_punctuation() {
+        let text = "reading #rust-lang, all of it";
+        let found = tag_candidates(text);
+        assert_eq!(&text[found[0].byte_start..found[0].byte_end], "#rust");
+
+        let sentence = "reading #rust.";
+        let found = tag_candidates(sentence);
+        assert_eq!(&sentence[found[0].byte_start..found[0].byte_end], "#rust");
+    }
+
+    #[test]
+    fn tag_candidates_count_bytes_after_multibyte_text() {
+        let text = "🙂 #tag";
+        let found = tag_candidates(text);
+        assert_eq!(found[0].byte_start, 5);
+        assert_eq!(&text[found[0].byte_start..found[0].byte_end], "#tag");
     }
 
     #[test]

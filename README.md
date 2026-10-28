@@ -43,8 +43,8 @@ server.
 
 What the app writes, in full: a new post, a reply to an existing post, a like, a repost, a
 block, a mute — and the deletes that undo them. It does not follow anyone or delete posts.
-A new post is text only for now: images would mean requiring alt text. URLs in a post or a
-reply are annotated, so they are clickable for everyone who reads it; mentions are not resolved.
+A new post is text only for now: images would mean requiring alt text. URLs, mentions and
+hashtags in a post or a reply are annotated, so they are clickable for everyone who reads it.
 
 ## Run it locally
 

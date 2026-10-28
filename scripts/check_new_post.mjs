@@ -14,10 +14,12 @@ const app = process.argv[2] ?? 'http://127.0.0.1:8099/';
 const cdp = 'http://localhost:9222';
 const PDS = 'http://127.0.0.1:8199';
 const POST_TEXT =
-  'Sharing the test site: https://bennett-elder.github.io/rust-frontend-for-bluesky/ with @someone.test';
+  'Sharing https://bennett-elder.github.io/rust-frontend-for-bluesky/ with @someone.test #alttest';
 const LINK = 'https://bennett-elder.github.io/rust-frontend-for-bluesky/';
 const MENTION = '@someone.test';
 const MENTION_DID = 'did:plc:mentioned';
+const TAG = '#alttest';
+const TAG_NAME = 'alttest';
 // Flipped before the second post, to prove an unresolvable handle stays plain text.
 let resolveMode = 'ok';
 
@@ -244,11 +246,12 @@ if ('reply' in record) failures.push('a top-level post carried reply refs');
 
 // Two facets: the link, and the mention that had to be resolved to a DID.
 const facets = record.facets ?? [];
-if (facets.length !== 2) failures.push(`expected 2 facets, saw ${facets.length}`);
+if (facets.length !== 3) failures.push(`expected 3 facets, saw ${facets.length}`);
 const linkFacet = facets.find((f) => f.features?.[0]?.$type === 'app.bsky.richtext.facet#link');
 const mentionFacet = facets.find(
   (f) => f.features?.[0]?.$type === 'app.bsky.richtext.facet#mention',
 );
+const tagFacet = facets.find((f) => f.features?.[0]?.$type === 'app.bsky.richtext.facet#tag');
 
 const linkStart = POST_TEXT.indexOf(LINK);
 if (linkFacet?.index?.byteStart !== linkStart) {
@@ -272,6 +275,17 @@ if (mentionFacet?.index?.byteEnd !== mentionStart + MENTION.length) {
 }
 if (mentionFacet?.features?.[0]?.did !== MENTION_DID) {
   failures.push(`mention did is ${JSON.stringify(mentionFacet?.features?.[0]?.did)}`);
+}
+
+const tagStart = POST_TEXT.indexOf(TAG);
+if (tagFacet?.index?.byteStart !== tagStart) {
+  failures.push(`tag facet starts at ${tagFacet?.index?.byteStart}, expected ${tagStart}`);
+}
+if (tagFacet?.index?.byteEnd !== tagStart + TAG.length) {
+  failures.push(`tag facet ends at ${tagFacet?.index?.byteEnd}`);
+}
+if (tagFacet?.features?.[0]?.tag !== TAG_NAME) {
+  failures.push(`tag facet carries ${JSON.stringify(tagFacet?.features?.[0]?.tag)}`);
 }
 
 // And the fallback: a handle that does not resolve leaves the text alone.
