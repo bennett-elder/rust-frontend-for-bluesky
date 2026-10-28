@@ -2693,27 +2693,51 @@ impl From<TextSegment<'_>> for OwnedSegment {
     }
 }
 
+/// `https://bsky.app/profile/<actor>` → the actor, when the URL is exactly that.
+///
+/// Post links (`…/profile/<actor>/post/<rkey>`) are deliberately not converted: building the
+/// at-uri needs a DID, and the actor in the URL may be a handle, so a half-conversion would
+/// produce a link that 404s inside the app instead of working outside it.
+fn bsky_profile_actor(uri: &str) -> Option<String> {
+    let rest = uri.strip_prefix("https://bsky.app/profile/")?;
+    if rest.is_empty() || rest.contains('/') || rest.contains('?') || rest.contains('#') {
+        return None;
+    }
+    Some(rest.to_string())
+}
+
 fn render_segment(segment: OwnedSegment) -> Element {
     match segment {
         OwnedSegment::Plain(text) => rsx! { "{text}" },
+        // A mention is an account in this app, so it opens the profile page here. It used to
+        // go to bsky.app in a new tab, which made every "who is this?" click leave the client.
         OwnedSegment::Mention { text, did } => rsx! {
             a {
                 class: "facet facet--mention",
-                href: "https://bsky.app/profile/{did}",
-                target: "_blank",
-                rel: "noreferrer",
+                href: "#/profile/{encode_uri(&did)}",
                 "{text}"
             }
         },
-        OwnedSegment::Link { text, uri } => rsx! {
-            a {
-                class: "facet facet--link",
-                href: "{uri}",
-                target: "_blank",
-                rel: "noreferrer",
-                "{text}"
+        OwnedSegment::Link { text, uri } => {
+            match bsky_profile_actor(&uri) {
+                Some(actor) => rsx! {
+                    a {
+                        class: "facet facet--link",
+                        href: "#/profile/{encode_uri(&actor)}",
+                        "{text}"
+                    }
+                },
+                None => rsx! {
+                    a {
+                        class: "facet facet--link",
+                        href: "{uri}",
+                        target: "_blank",
+                        rel: "noreferrer",
+                        "{text}"
+                    }
+                },
             }
-        },
+        }
         OwnedSegment::Tag { text, tag } => rsx! {
             a {
                 class: "facet facet--tag",

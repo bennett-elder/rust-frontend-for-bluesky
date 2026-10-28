@@ -2168,6 +2168,21 @@ mod facet_tests {
     }
 
     #[test]
+    fn a_facet_that_ends_at_the_end_of_the_text_keeps_its_last_character() {
+        let text = "see https://bsky.app/profile/bluesky.test";
+        let facets = link_facets(text);
+        let segments = text_segments(text, Some(&facets));
+        let link = segments
+            .iter()
+            .find_map(|segment| match segment {
+                TextSegment::Link { text, .. } => Some(*text),
+                _ => None,
+            })
+            .expect("a link segment");
+        assert_eq!(link, "https://bsky.app/profile/bluesky.test");
+    }
+
+    #[test]
     fn facet_that_splits_a_character_is_ignored() {
         let text = "🦋 hi";
         let facets = vec![mention(1, 3)]; // inside the butterfly
