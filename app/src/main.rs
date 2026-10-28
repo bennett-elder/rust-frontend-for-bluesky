@@ -547,6 +547,8 @@ enum Route {
     Feeds,
     /// Reading preferences, on their own page.
     Settings,
+    /// Writing a new top-level post, on its own page.
+    Compose,
     /// The way in: app password or OAuth, on their own page rather than in the header.
     SignIn,
     Feed { uri: String },
@@ -571,6 +573,7 @@ fn parse_hash(hash: &str) -> Route {
         "feeds" => Route::Feeds,
         "notifications" => Route::Notifications,
         "settings" => Route::Settings,
+        "compose" => Route::Compose,
         "sign-in" => Route::SignIn,
         "feed" if !rest.is_empty() => Route::Feed {
             uri: decode_hash_value(rest),
@@ -612,6 +615,7 @@ fn route_hash(route: &Route) -> String {
         Route::Feeds => "#/feeds".to_string(),
         Route::Notifications => "#/notifications".to_string(),
         Route::Settings => "#/settings".to_string(),
+        Route::Compose => "#/compose".to_string(),
         Route::SignIn => "#/sign-in".to_string(),
         Route::Feed { uri } => format!("#/feed/{}", encode_uri(uri)),
         Route::Profile { actor } => format!("#/profile/{}", encode_uri(actor)),
@@ -1122,6 +1126,7 @@ fn route_key(route: &Route) -> String {
         Route::Feeds => "feeds".to_string(),
         Route::Notifications => "notifications".to_string(),
         Route::Settings => "settings".to_string(),
+        Route::Compose => "compose".to_string(),
         Route::SignIn => "sign-in".to_string(),
         Route::Feed { uri } => format!("custom:{uri}"),
         Route::Profile { actor } => format!("profile:{actor}"),
@@ -1224,6 +1229,7 @@ fn update_title(route: &Route, label: &str) {
         Route::Feeds => TitleSubject::Feeds,
         Route::Notifications => TitleSubject::Notifications,
         Route::Settings => TitleSubject::Settings,
+        Route::Compose => TitleSubject::Compose,
         Route::SignIn => TitleSubject::SignIn,
         Route::Profile { actor } => TitleSubject::Profile { handle: actor },
         Route::Post { .. } => TitleSubject::Post,
@@ -1278,7 +1284,8 @@ fn source_for(route: &Route, saved: &[(String, String)]) -> Option<FeedSource> {
         | Route::Feeds
         | Route::Settings
         | Route::SignIn
-        | Route::Notifications => None,
+        | Route::Notifications
+        | Route::Compose => None,
     }
 }
 
@@ -1761,6 +1768,33 @@ async fn create_reply(
         .as_str()
         .map(str::to_string)
         .ok_or_else(|| "reply created but no uri returned".to_string())
+}
+
+/// A top-level post: the reply record without the `reply` refs.
+///
+/// Same call, same record type, same error surface — the only thing that made writing
+/// impossible was that the one existing writer always attached a parent.
+async fn create_post(session: &Session, text: &str) -> Result<String, String> {
+    let body = serde_json::json!({
+        "repo": session.did,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": text,
+            "createdAt": now_iso().await,
+        }
+    });
+    let response: serde_json::Value = request_json(
+        "POST",
+        &format!("{}/xrpc/com.atproto.repo.createRecord", session.pds),
+        session.auth(),
+        Some(&body.to_string()),
+    )
+    .await?;
+    response["uri"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| "post created but no uri returned".to_string())
 }
 
 /// Mute or unmute an account.
@@ -2851,6 +2885,99 @@ fn EngagementView(route: Signal<Route>) -> Element {
     }
 }
 
+/// Writing a new post, on its own page.
+///
+/// Deliberately shaped like the reply box that already works: same counter, same
+/// disabled-while-empty rule, same error line under it. Only the record differs — no `reply`
+/// refs — and the destination afterwards, which is the author's own profile because that page
+/// refetches and will actually show the post. A feed only picks it up when its revalidation
+/// runs, and claiming otherwise would be the kind of lie this project keeps a table for.
+#[component]
+fn ComposeView() -> Element {
+    let session_state = use_context::<SessionState>();
+    let mut text = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+    let mut error = use_signal(|| None::<String>);
+
+    let Some(signed) = (session_state.0)() else {
+        return rsx! {
+            section { class: "compose",
+                h2 { class: "page-title", "New post" }
+                p { class: "note", "Writing a post needs a signed-in session." }
+                button {
+                    r#type: "button",
+                    class: "feed-tab feed-tab--active",
+                    onclick: move |_| navigate("#/sign-in"),
+                    "Sign in"
+                }
+            }
+        };
+    };
+
+    let handle = signed.handle.clone();
+    rsx! {
+        section { class: "compose",
+            h2 { class: "page-title", "New post" }
+            form {
+                class: "reply-box compose__box",
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    let value = text().trim().to_string();
+                    if value.is_empty() || busy() {
+                        return;
+                    }
+                    let Some(signed) = (session_state.0)() else {
+                        return;
+                    };
+                    let handle = handle.clone();
+                    busy.set(true);
+                    error.set(None);
+                    spawn(async move {
+                        match create_post(&signed, &value).await {
+                            Ok(_) => {
+                                text.set(String::new());
+                                navigate(&format!("#/profile/{}", encode_uri(&handle)));
+                            }
+                            Err(err) => error.set(Some(err)),
+                        }
+                        busy.set(false);
+                    });
+                },
+                textarea {
+                    class: "reply-box__input",
+                    rows: "5",
+                    "aria-label": "Post text",
+                    placeholder: "What do you want to say?",
+                    value: "{text}",
+                    oninput: move |event| text.set(event.value()),
+                }
+                div { class: "reply-box__row",
+                    span { class: "reply-box__count", "{text().chars().count()}/300" }
+                    button {
+                        r#type: "submit",
+                        class: "reply-box__send",
+                        // Same rule as the reply box, deliberately: chars, not graphemes, so it
+                        // can only ever be stricter than the server's limit.
+                        disabled: busy()
+                            || text().trim().is_empty()
+                            || text().chars().count() > 300,
+                        if busy() { "Posting…" } else { "Post" }
+                    }
+                }
+                if let Some(err) = error() {
+                    p { class: "reply-box__error", "{err}" }
+                }
+            }
+            p { class: "note",
+                "Text only for now. Images would need alt text to be required, which is a \
+                 separate decision; links and mentions are not clickable in what this app \
+                 posts yet."
+            }
+        }
+    }
+}
+
+
 /// Reading preferences, on a page — the same shape as Feeds, because a popover for
 /// one checkbox was a menu pretending to be a destination.
 #[component]
@@ -2955,6 +3082,8 @@ fn action_icon(kind: &str) -> Element {
             "M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z",
             "M21 21l-4.35-4.35",
         ],
+        // A pen, for writing: the one action the app could not do until now.
+        "compose" => vec!["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"],
         "home" => vec![
             "M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
             "M9 22V12h6v10",
@@ -3681,6 +3810,7 @@ fn App() -> Element {
         | Route::PostQuotes { .. }
         | Route::Feeds
         | Route::Settings
+        | Route::Compose
         | Route::Notifications => String::new(),
         feed => route_hash(&feed),
     };
@@ -3775,6 +3905,14 @@ fn App() -> Element {
                     span { "Feeds" }
                 }
                 div { class: "rail__bottom",
+                    if signed_handle.is_some() {
+                        a {
+                            class: if matches!(current_route, Route::Compose) { "rail__item rail__item--active" } else { "rail__item" },
+                            href: "#/compose",
+                            {action_icon("compose")}
+                            span { "New post" }
+                        }
+                    }
                     if let Some(handle) = signed_handle.clone() {
                         a {
                             class: if matches!(&current_route, Route::Profile { actor } if actor == &handle) { "rail__item rail__item--active" } else { "rail__item" },
@@ -3898,12 +4036,21 @@ fn App() -> Element {
                         onclick: move |_| navigate("#/feeds"),
                         "Feeds"
                     }
+                    if (session.0)().is_some() {
+                        button {
+                            r#type: "button",
+                            class: if matches!(route(), Route::Compose) { "feed-tab feed-tab--active" } else { "feed-tab" },
+                            onclick: move |_| navigate("#/compose"),
+                            "New post"
+                        }
+                    }
                 }
 
             {match route() {
                 Route::Home => rsx! { ExploreView {} },
                 Route::Notifications => rsx! { NotificationsView {} },
                 Route::Settings => rsx! { SettingsView {} },
+                Route::Compose => rsx! { ComposeView {} },
 
                 // These views read the route signal themselves: a plain prop captured
                 // inside `use_resource` never re-runs, so navigating reply-to-reply

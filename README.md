@@ -2,8 +2,8 @@
 
 An alt-text-first Bluesky client: **alt text is the post's media**, and an image or video is
 opt-in per embed. It reads everything public — feeds, threads, profiles, search, trending —
-and writes only what a reader needs to take part: replies, likes, reposts, and muting or
-blocking an account.
+and writes only what a reader needs to take part: posts and replies, likes, reposts, and
+muting or blocking an account.
 
 Rust with [Dioxus](https://dioxuslabs.com), as a web app (WASM) and an Android WebView app
 from one codebase.
@@ -22,6 +22,8 @@ on its own tab, with endless scroll and a Back that returns to where you were.
 direct replies fold behind a disclosure you can open.
 - **Post menus** — copy the post's link (this app, or bsky.app) or its text; mute or block the
 author, from the profile or the post itself.
+- **New post** — text only, from the rail or the tab row. Posting lands on your own profile,
+where the post is; a feed shows it once its revalidation runs.
 - **Light, dark, or system**, remembered per device.
 - Real links throughout: cmd-click opens a new tab, and `#/post/<at-uri>` is a shareable deep
 link.
@@ -39,9 +41,10 @@ server.
 
 **Settings** says which kind of session you hold, and whether it survives a reload.
 
-What the app writes, in full: a reply to an existing post, a like, a repost, a block, a mute —
-and the deletes that undo them. It does not create top-level posts, follow anyone, or delete
-posts.
+What the app writes, in full: a new post, a reply to an existing post, a like, a repost, a
+block, a mute — and the deletes that undo them. It does not follow anyone or delete posts.
+A new post is text only for now: images would mean requiring alt text, and links and mentions
+are not linked yet.
 
 ## Run it locally
 
