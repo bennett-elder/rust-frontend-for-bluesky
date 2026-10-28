@@ -1744,18 +1744,21 @@ async fn create_reply(
     text: &str,
     refs: &ReplyRef,
 ) -> Result<String, String> {
+    let mut record = serde_json::json!({
+        "$type": "app.bsky.feed.post",
+        "text": text,
+        "createdAt": now_iso().await,
+        "reply": {
+            "root": { "uri": refs.root.uri, "cid": refs.root.cid },
+            "parent": { "uri": refs.parent.uri, "cid": refs.parent.cid },
+        },
+    });
+    // Replies carry facets too: a link in a reply was as inert as a link in a post.
+    attach_facets(&mut record, text);
     let body = serde_json::json!({
         "repo": session.did,
         "collection": "app.bsky.feed.post",
-        "record": {
-            "$type": "app.bsky.feed.post",
-            "text": text,
-            "createdAt": now_iso().await,
-            "reply": {
-                "root": { "uri": refs.root.uri, "cid": refs.root.cid },
-                "parent": { "uri": refs.parent.uri, "cid": refs.parent.cid },
-            },
-        }
+        "record": record,
     });
     let response: serde_json::Value = request_json(
         "POST",
@@ -1770,19 +1773,35 @@ async fn create_reply(
         .ok_or_else(|| "reply created but no uri returned".to_string())
 }
 
+/// Annotate a record's text with the links it contains.
+///
+/// Without this a URL is stored as plain text and nothing can click it — which is how a client
+/// ends up unable to share its own address. Mentions are not resolved here (that needs a
+/// handle-to-DID lookup); links are the half that matters for sharing.
+fn attach_facets(record: &mut serde_json::Value, text: &str) {
+    let facets = alt_first_core::link_facets(text);
+    if !facets.is_empty() {
+        if let Ok(value) = serde_json::to_value(&facets) {
+            record["facets"] = value;
+        }
+    }
+}
+
 /// A top-level post: the reply record without the `reply` refs.
 ///
 /// Same call, same record type, same error surface — the only thing that made writing
 /// impossible was that the one existing writer always attached a parent.
 async fn create_post(session: &Session, text: &str) -> Result<String, String> {
+    let mut record = serde_json::json!({
+        "$type": "app.bsky.feed.post",
+        "text": text,
+        "createdAt": now_iso().await,
+    });
+    attach_facets(&mut record, text);
     let body = serde_json::json!({
         "repo": session.did,
         "collection": "app.bsky.feed.post",
-        "record": {
-            "$type": "app.bsky.feed.post",
-            "text": text,
-            "createdAt": now_iso().await,
-        }
+        "record": record,
     });
     let response: serde_json::Value = request_json(
         "POST",
@@ -2970,8 +2989,7 @@ fn ComposeView() -> Element {
             }
             p { class: "note",
                 "Text only for now. Images would need alt text to be required, which is a \
-                 separate decision; links and mentions are not clickable in what this app \
-                 posts yet."
+                 separate decision. Links are linked; mentions are not resolved yet."
             }
         }
     }

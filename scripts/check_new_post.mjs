@@ -13,7 +13,9 @@ import { createServer } from 'node:http';
 const app = process.argv[2] ?? 'http://127.0.0.1:8099/';
 const cdp = 'http://localhost:9222';
 const PDS = 'http://127.0.0.1:8199';
-const POST_TEXT = 'Alt text is the post.';
+const POST_TEXT =
+  'Sharing the test site: https://bennett-elder.github.io/rust-frontend-for-bluesky/';
+const LINK = 'https://bennett-elder.github.io/rust-frontend-for-bluesky/';
 
 const fixture = (name) =>
   JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
@@ -191,6 +193,23 @@ if (record.$type !== 'app.bsky.feed.post') failures.push(`$type is ${record.$typ
 if (record.text !== POST_TEXT) failures.push(`text is ${JSON.stringify(record.text)}`);
 if (!record.createdAt) failures.push('no createdAt');
 if ('reply' in record) failures.push('a top-level post carried reply refs');
+
+// The link half: this is what makes the URL clickable to everyone who reads the post.
+const facets = record.facets ?? [];
+if (facets.length !== 1) failures.push(`expected 1 facet, saw ${facets.length}`);
+const facet = facets[0] ?? {};
+const expectedStart = POST_TEXT.indexOf(LINK);
+if (facet.index?.byteStart !== expectedStart) {
+  failures.push(`facet starts at ${facet.index?.byteStart}, expected ${expectedStart}`);
+}
+if (facet.index?.byteEnd !== expectedStart + LINK.length) {
+  failures.push(`facet ends at ${facet.index?.byteEnd}, expected ${expectedStart + LINK.length}`);
+}
+const feature = facet.features?.[0] ?? {};
+if (feature.$type !== 'app.bsky.richtext.facet#link') {
+  failures.push(`facet type is ${feature.$type}`);
+}
+if (feature.uri !== LINK) failures.push(`facet uri is ${feature.uri}`);
 if (!enabled) failures.push('the Post button was not enabled with text in the box');
 if (typed.count !== `${POST_TEXT.length}/300`) failures.push(`counter showed ${typed.count}`);
 if (!String(landed).startsWith('#/profile/stub.test')) {

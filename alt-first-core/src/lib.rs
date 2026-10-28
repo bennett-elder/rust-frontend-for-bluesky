@@ -225,6 +225,101 @@ pub enum FacetFeature {
     Unknown,
 }
 
+/// Link facets for text this client is about to publish.
+///
+/// atproto stores annotations as **byte** ranges into the post text, so a URL is only clickable
+/// if the record carries `app.bsky.richtext.facet#link` over exactly the right offsets. Nothing
+/// here resolves mentions — that needs a handle-to-DID lookup — so this is the half that lets a
+/// reader share a URL, which is the half you notice when it is missing.
+///
+/// A scanner rather than a regex on purpose: the crate has no regex dependency, and the rules
+/// that actually matter are three — a scheme, a host, and not swallowing the punctuation that
+/// ends the sentence.
+pub fn link_facets(text: &str) -> Vec<Facet> {
+    // ASCII-only lowercasing leaves every byte offset identical to `text`, which is exactly
+    // what the ranges have to be.
+    let lowered = text.to_ascii_lowercase();
+    let mut facets = Vec::new();
+    let mut search = 0usize;
+
+    while let Some(offset) = lowered[search..].find("http") {
+        let start = search + offset;
+        search = start + 4;
+
+        let scheme = if lowered[start..].starts_with("https://") {
+            8
+        } else if lowered[start..].starts_with("http://") {
+            7
+        } else {
+            continue;
+        };
+        // `xhttp://…` is not a link; the scheme has to start a token.
+        if text[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|prev| prev.is_alphanumeric())
+        {
+            continue;
+        }
+
+        // Walk to the end of the URL, keeping balanced parentheses (Wikipedia) and stopping at
+        // an unbalanced closing one (a URL wrapped in a sentence's brackets).
+        let base = start + scheme;
+        let mut end = base;
+        let mut depth = 0usize;
+        for (offset, ch) in text[base..].char_indices() {
+            if ch.is_whitespace() {
+                break;
+            }
+            match ch {
+                '(' => depth += 1,
+                ')' if depth == 0 => break,
+                ')' => depth -= 1,
+                _ => {}
+            }
+            end = base + offset + ch.len_utf8();
+        }
+
+        // A sentence that ends in a URL ends with punctuation the URL does not own.
+        while end > base {
+            let last = text[..end].chars().next_back().expect("end > base");
+            if matches!(last, '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '"') {
+                end -= last.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if end <= base {
+            continue;
+        }
+
+        let uri = &text[start..end];
+        let host = uri[scheme..]
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or_default();
+        if host.is_empty() || !host.contains('.') {
+            // `https://`, `https:///path`, or a dotless name. A `localhost` URL is
+            // deliberately not a link: nobody posts one to a public network, so a clause
+            // honouring it would be untested-in-practice behaviour carried forever.
+            continue;
+        }
+
+        facets.push(Facet {
+            index: ByteRange {
+                byte_start: start,
+                byte_end: end,
+            },
+            features: vec![FacetFeature::Link {
+                uri: uri.to_string(),
+            }],
+        });
+        search = end;
+    }
+
+    facets
+}
+
 /// A piece of post text with an optional annotation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextSegment<'a> {
@@ -1961,6 +2056,115 @@ mod facet_tests {
                 TextSegment::Plain(" hi"),
             ]
         );
+    }
+
+    #[test]
+    fn link_facets_mark_the_url_and_nothing_else() {
+        let url = "https://bennett-elder.github.io/rust-frontend-for-bluesky/";
+        let text = format!("sharing {url} today");
+        let facets = link_facets(&text);
+        assert_eq!(facets.len(), 1);
+        assert_eq!(facets[0].index.byte_start, text.find("https").unwrap());
+        assert_eq!(&text[facets[0].index.byte_end..], " today");
+        assert_eq!(
+            facets[0].features,
+            vec![FacetFeature::Link {
+                uri: url.to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn link_facets_do_not_swallow_the_punctuation_that_ends_the_sentence() {
+        let text = "see https://example.test/a.";
+        let facet = &link_facets(text)[0];
+        assert_eq!(&text[facet.index.byte_start..facet.index.byte_end], "https://example.test/a");
+
+        let comma = "https://example.test/a, and more";
+        let facet = &link_facets(comma)[0];
+        assert_eq!(
+            &comma[facet.index.byte_start..facet.index.byte_end],
+            "https://example.test/a"
+        );
+    }
+
+    #[test]
+    fn link_facets_count_bytes_rather_than_characters() {
+        // The emoji is four bytes: a char index here would put the facet inside the URL's
+        // scheme and break every reader that trusted it.
+        let text = "👋 https://example.test";
+        let facet = &link_facets(text)[0];
+        assert_eq!(facet.index.byte_start, text.find("https").unwrap());
+        assert_ne!(facet.index.byte_start, text.chars().position(|c| c == 'h').unwrap());
+        assert_eq!(
+            &text[facet.index.byte_start..facet.index.byte_end],
+            "https://example.test"
+        );
+    }
+
+    #[test]
+    fn link_facets_keep_balanced_parentheses() {
+        let wiki = "https://en.wikipedia.org/wiki/Foo_(bar)";
+        let facet = &link_facets(wiki)[0];
+        assert_eq!(facet.index.byte_end, wiki.len());
+        assert_eq!(
+            facet.features,
+            vec![FacetFeature::Link {
+                uri: wiki.to_string()
+            }]
+        );
+
+        let wrapped = "(see https://example.test/x)";
+        let facet = &link_facets(wrapped)[0];
+        assert_eq!(
+            &wrapped[facet.index.byte_start..facet.index.byte_end],
+            "https://example.test/x"
+        );
+    }
+
+    #[test]
+    fn link_facets_find_every_link_in_order() {
+        let text = "a https://one.test b http://two.test/c";
+        let facets = link_facets(text);
+        assert_eq!(facets.len(), 2);
+        assert_eq!(&text[facets[0].index.byte_start..facets[0].index.byte_end], "https://one.test");
+        assert_eq!(
+            &text[facets[1].index.byte_start..facets[1].index.byte_end],
+            "http://two.test/c"
+        );
+    }
+
+    #[test]
+    fn link_facets_accept_an_upper_case_scheme_and_keep_the_original_text() {
+        let text = "HTTPS://Example.test/Path";
+        let facets = link_facets(text);
+        assert_eq!(facets.len(), 1);
+        assert_eq!(
+            facets[0].features,
+            vec![FacetFeature::Link {
+                uri: text.to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn link_facets_ignore_what_is_not_a_link() {
+        assert!(link_facets("no links here").is_empty());
+        assert!(link_facets("http://").is_empty());
+        assert!(link_facets("https:///path-only").is_empty());
+        assert!(link_facets("xhttp://example.test").is_empty());
+    }
+
+    #[test]
+    fn link_facets_need_a_scheme_and_a_dotted_host() {
+        // The official client also links bare domains (`bsky.social` becomes
+        // `https://bsky.social`); this scanner does not, so a test claiming otherwise would be
+        // lying. Recorded here so the gap is visible in the suite rather than in a post that
+        // silently came out unlinked.
+        assert!(link_facets("see bsky.social for details").is_empty());
+        // And a localhost URL is outside what this client posts, so it stays plain text.
+        assert!(link_facets("running on localhost:8099").is_empty());
+        assert!(link_facets("running on http://localhost:8099/").is_empty());
     }
 
     #[test]
