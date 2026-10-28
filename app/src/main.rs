@@ -467,6 +467,22 @@ async fn rotate_session(mut state: SessionState, stale: &Session) -> Result<Sess
     }
 }
 
+/// True when a 401 means the access token is no longer good — as opposed to a DPoP nonce or
+/// proof problem.
+///
+/// The distinction matters because rotating costs a single-use refresh token. A PDS answers a
+/// stale cached nonce with `401 use_dpop_nonce` and a fresh `DPoP-Nonce`, which `request_text`
+/// retries by itself; treating that as expiry would spend a token on a clock that drifted, and
+/// on a page with two parallel reads it would do it twice.
+fn is_expired_token(error: &str) -> bool {
+    if error.contains("use_dpop_nonce") || error.contains("invalid_dpop_proof") {
+        return false;
+    }
+    ["ExpiredToken", "invalid_token", "InvalidToken", "AuthMissing"]
+        .iter()
+        .any(|marker| error.contains(marker))
+}
+
 /// One authenticated GET against the account's PDS, rotating an expired access token once.
 ///
 /// Reads used to skip this. The restore path deliberately does not rotate on load — it cost a
@@ -489,7 +505,7 @@ async fn authed_get<T: serde::de::DeserializeOwned>(
     match authed_get_with::<T>(path, &existing).await {
         Ok(value) => Ok(value),
         Err(original) => {
-            if !original.contains("HTTP 401") {
+            if !is_expired_token(&original) {
                 return Err(original);
             }
             match rotate_session(state, &existing).await {
@@ -1976,7 +1992,7 @@ fn toggle_reaction(
         // Access tokens expire in ~2 h; rotate and retry once, like feed loads do. The
         // rotation must be saved — see the feed path for why.
         if let Err(error) = &result {
-            if error.contains("HTTP 401") {
+            if is_expired_token(error) {
                 // Same one rotation path as feeds and reads — including its cross-tab handling,
                 // so a like in two tabs cannot sign the loser out.
                 match rotate_session(session_state, &signed).await {
@@ -3615,7 +3631,7 @@ fn App() -> Element {
             // Access tokens expire in ~2 h; rotate and retry once instead of
             // surfacing a bare 401.
             if let (Err(error), Some(existing)) = (&result, current.clone()) {
-                if error.contains("HTTP 401") {
+                if is_expired_token(error) {
                     // One implementation of "rotate", shared with reads and reactions, so the
                     // cross-tab race is handled once: a tab whose token another tab just spent
                     // adopts that pair instead of reporting a dead grant.
