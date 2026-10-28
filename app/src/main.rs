@@ -843,6 +843,77 @@ fn install_menu_dismiss() {
     );
 }
 
+/// Drag the feed strip with a mouse, the way the official app lets you.
+///
+/// The strip is a horizontal scroller with its scrollbar hidden, which on a touchscreen is fine
+/// — you swipe it. A mouse has no swipe, so the tabs past the right edge were reachable only by
+/// tabbing to them. This adds pointer drag (mouse only; touch keeps its native momentum
+/// scrolling), swallows the click that ends a drag so a drag does not open the tab under the
+/// cursor, and lets the arrow keys walk the row when one of its items has focus.
+fn install_feed_strip_drag() {
+    document::eval(
+        r#"(() => {
+            if (window.__altStripDrag) return;
+            window.__altStripDrag = true;
+            let drag = null;
+            let suppressClickUntil = 0;
+
+            document.addEventListener('pointerdown', (event) => {
+                if (event.pointerType !== 'mouse' || event.button !== 0) return;
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                const strip = target.closest('.feed-tabs');
+                if (!strip || strip.scrollWidth <= strip.clientWidth + 1) return;
+                drag = { strip, startX: event.clientX, startScroll: strip.scrollLeft, moved: false };
+            });
+
+            document.addEventListener('pointermove', (event) => {
+                if (!drag) return;
+                const dx = event.clientX - drag.startX;
+                if (!drag.moved && Math.abs(dx) < 4) return;
+                drag.moved = true;
+                drag.strip.classList.add('feed-tabs--dragging');
+                drag.strip.scrollLeft = drag.startScroll - dx;
+            });
+
+            const finish = () => {
+                if (!drag) return;
+                if (drag.moved) {
+                    drag.strip.classList.remove('feed-tabs--dragging');
+                    // The click that follows pointerup belongs to the drag, not to the tab
+                    // that happens to be under the cursor when it ends.
+                    suppressClickUntil = Date.now() + 350;
+                }
+                drag = null;
+            };
+            document.addEventListener('pointerup', finish);
+            document.addEventListener('pointercancel', finish);
+
+            document.addEventListener('click', (event) => {
+                if (Date.now() >= suppressClickUntil) return;
+                const target = event.target;
+                if (!(target instanceof Element) || !target.closest('.feed-tabs')) return;
+                event.preventDefault();
+                event.stopPropagation();
+            }, true);
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                const item = target.closest('.feed-tabs > *');
+                if (!item) return;
+                const items = [...item.parentElement.children];
+                const next = items[items.indexOf(item) + (event.key === 'ArrowRight' ? 1 : -1)];
+                if (!next) return;
+                event.preventDefault();
+                next.focus();
+                next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            }, true);
+        })()"#,
+    );
+}
+
 /// Close this menu when the document says so (outside click, Escape, another menu).
 fn use_menu_dismiss(mut open: Signal<bool>) {
     use_effect(move || {
@@ -3552,6 +3623,7 @@ fn App() -> Element {
         install_click_navigation();
         install_double_click_top();
         install_menu_dismiss();
+        install_feed_strip_drag();
         install_when();
         install_scroll_memory();
         install_auto_load();
@@ -3950,6 +4022,50 @@ fn App() -> Element {
                     }
                 }
             }
+            // The rail needs 900 px. Below that this row is the only navigation — without it
+            // Explore and Notifications were unreachable on a phone except by typing a URL,
+            // and the tab row next to the feed is *feed* tabs, not destinations.
+            nav { class: "bottom-nav", "aria-label": "Primary",
+                a {
+                    class: if matches!(current_route, Route::Following) { "bottom-nav__item bottom-nav__item--active" } else { "bottom-nav__item" },
+                    href: "#/following",
+                    "data-scroll-top": "home",
+                    onclick: move |event| {
+                        if (session.0)().is_none() {
+                            event.prevent_default();
+                            navigate("#/sign-in");
+                        }
+                    },
+                    {action_icon("home")}
+                    span { class: "bottom-nav__label", "Home" }
+                }
+                a {
+                    class: if matches!(current_route, Route::Home) { "bottom-nav__item bottom-nav__item--active" } else { "bottom-nav__item" },
+                    href: "#/",
+                    {action_icon("search")}
+                    span { class: "bottom-nav__label", "Explore" }
+                }
+                a {
+                    class: if matches!(current_route, Route::Notifications) { "bottom-nav__item bottom-nav__item--active" } else { "bottom-nav__item" },
+                    href: "#/notifications",
+                    {action_icon("bell")}
+                    span { class: "bottom-nav__label", "Notifications" }
+                }
+                a {
+                    class: if matches!(current_route, Route::Feeds) { "bottom-nav__item bottom-nav__item--active" } else { "bottom-nav__item" },
+                    href: "#/feeds",
+                    {action_icon("list")}
+                    span { class: "bottom-nav__label", "Feeds" }
+                }
+                if signed_handle.is_some() {
+                    a {
+                        class: if matches!(current_route, Route::Compose) { "bottom-nav__item bottom-nav__item--active" } else { "bottom-nav__item" },
+                        href: "#/compose",
+                        {action_icon("compose")}
+                        span { class: "bottom-nav__label", "Post" }
+                    }
+                }
+            }
             main { class: "timeline",
             header { class: "app-header",
                 div { class: "app-header__row",
@@ -4046,22 +4162,6 @@ fn App() -> Element {
                             "{tab.label()}"
                         }
                             }
-                        }
-                    }
-                    // The rail is hidden on narrow screens, so the Feeds page needs a
-                    // way in from the tab row too.
-                    button {
-                        r#type: "button",
-                        class: if matches!(route(), Route::Feeds) { "feed-tab feed-tab--active" } else { "feed-tab" },
-                        onclick: move |_| navigate("#/feeds"),
-                        "Feeds"
-                    }
-                    if (session.0)().is_some() {
-                        button {
-                            r#type: "button",
-                            class: if matches!(route(), Route::Compose) { "feed-tab feed-tab--active" } else { "feed-tab" },
-                            onclick: move |_| navigate("#/compose"),
-                            "New post"
                         }
                     }
                 }
