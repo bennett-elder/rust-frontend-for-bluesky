@@ -320,6 +320,79 @@ pub fn link_facets(text: &str) -> Vec<Facet> {
     facets
 }
 
+/// A handle found in text, with the byte range it occupies — `@` included.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MentionCandidate {
+    pub byte_start: usize,
+    pub byte_end: usize,
+    pub handle: String,
+}
+
+/// `@handle` occurrences that could become mention facets.
+///
+/// Candidates rather than facets, because a facet needs a **DID** and that needs a network
+/// lookup: the caller resolves each handle and builds the facet, or leaves the text plain when
+/// it does not resolve. An `@` inside a word is not a mention, which is what keeps email
+/// addresses (`me@example.com`) and `@@` out of the results.
+pub fn mention_candidates(text: &str) -> Vec<MentionCandidate> {
+    let mut found = Vec::new();
+
+    for (index, _) in text.match_indices('@') {
+        if let Some(prev) = text[..index].chars().next_back() {
+            if prev.is_alphanumeric() || matches!(prev, '.' | '_' | '-' | '@') {
+                continue;
+            }
+        }
+
+        let mut end = index + 1;
+        for (offset, ch) in text[end..].char_indices() {
+            if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' {
+                end = index + 1 + offset + ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        // A sentence that ends in a handle ends with punctuation the handle does not own.
+        while end > index + 1 {
+            let last = text[..end].chars().next_back().expect("end > index + 1");
+            if last == '.' || last == '-' {
+                end -= last.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        let handle = &text[index + 1..end];
+        if is_handle_shaped(handle) {
+            found.push(MentionCandidate {
+                byte_start: index,
+                byte_end: end,
+                handle: handle.to_string(),
+            });
+        }
+    }
+
+    found
+}
+
+/// A handle is dotted labels, ending in a label of at least two letters.
+fn is_handle_shaped(handle: &str) -> bool {
+    let labels: Vec<&str> = handle.split('.').collect();
+    if labels.len() < 2 {
+        return false;
+    }
+    if !labels.iter().all(|label| {
+        !label.is_empty()
+            && label
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    }) {
+        return false;
+    }
+    let tld = labels[labels.len() - 1];
+    tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic())
+}
+
 /// A piece of post text with an optional annotation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextSegment<'a> {
@@ -2165,6 +2238,59 @@ mod facet_tests {
         // And a localhost URL is outside what this client posts, so it stays plain text.
         assert!(link_facets("running on localhost:8099").is_empty());
         assert!(link_facets("running on http://localhost:8099/").is_empty());
+    }
+
+    #[test]
+    fn mention_candidates_carry_the_at_sign_in_their_range() {
+        let text = "hi @a.test";
+        let found = mention_candidates(text);
+        assert_eq!(found.len(), 1);
+        assert_eq!(&text[found[0].byte_start..found[0].byte_end], "@a.test");
+        assert_eq!(found[0].handle, "a.test");
+    }
+
+    #[test]
+    fn mention_candidates_ignore_emails_and_word_at_signs() {
+        assert!(mention_candidates("me@example.com").is_empty());
+        assert!(mention_candidates("a.b@example.com").is_empty());
+        assert!(mention_candidates("n@@example.test").is_empty());
+    }
+
+    #[test]
+    fn mention_candidates_need_a_dotted_handle() {
+        assert!(mention_candidates("@handle").is_empty());
+        assert!(mention_candidates("@handle.t").is_empty());
+        assert!(mention_candidates("@.test").is_empty());
+    }
+
+    #[test]
+    fn mention_candidates_trim_the_punctuation_after_them() {
+        let text = "ask @a.test, please";
+        let found = mention_candidates(text);
+        assert_eq!(&text[found[0].byte_start..found[0].byte_end], "@a.test");
+
+        let sentence = "ask @a.test.";
+        let found = mention_candidates(sentence);
+        assert_eq!(&sentence[found[0].byte_start..found[0].byte_end], "@a.test");
+    }
+
+    #[test]
+    fn mention_candidates_are_blank_delimited_and_survive_multibyte_text() {
+        let text = "👋 @a.test and @b.test";
+        let found = mention_candidates(text);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].byte_start, text.find('@').unwrap());
+        assert_eq!(&text[found[1].byte_start..found[1].byte_end], "@b.test");
+    }
+
+    #[test]
+    fn mention_candidates_are_ordered_and_count_bytes() {
+        // Regression shape: an emoji before the mention must not shift the range.
+        let text = "🙂 cc @someone.test";
+        let found = mention_candidates(text);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].byte_start, text.find('@').unwrap());
+        assert_eq!(found[0].byte_start, 8); // 🙂 is 4 bytes, then " cc " is 4
     }
 
     #[test]

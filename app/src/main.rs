@@ -3,7 +3,8 @@ mod oauth_flow;
 use alt_first_core::{
     alt_policy, continue_thread_label, decode_uri_component as decode_hash_value,
     encode_uri_component as encode_uri, feed_end_note, new_post_count, placeholder_ratio,
-    text_segments, unfetched_replies, video_alt_policy, EmbedRecordView, EmbedView, ExternalView,
+    text_segments, unfetched_replies, video_alt_policy, ByteRange, EmbedRecordView, EmbedView,
+    ExternalView, Facet, FacetFeature,
     LikesResponse, NotificationsResponse, PostsResponse, ProfileViewerState, QuotesResponse,
     ReplyRef, RepostedByResponse, SignInMode,
     SearchPostsResponse,
@@ -1825,7 +1826,7 @@ async fn create_reply(
         },
     });
     // Replies carry facets too: a link in a reply was as inert as a link in a post.
-    attach_facets(&mut record, text);
+    attach_facets(&mut record, text).await;
     let body = serde_json::json!({
         "repo": session.did,
         "collection": "app.bsky.feed.post",
@@ -1844,13 +1845,48 @@ async fn create_reply(
         .ok_or_else(|| "reply created but no uri returned".to_string())
 }
 
-/// Annotate a record's text with the links it contains.
+/// Handle → DID, which is what a mention facet has to store.
+async fn resolve_handle(handle: &str) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct Resolved {
+        did: String,
+    }
+    let resolved: Resolved = request_json(
+        "GET",
+        &format!(
+            "{PUBLIC_API}/xrpc/com.atproto.identity.resolveHandle?handle={}",
+            encode_uri(handle)
+        ),
+        None,
+        None,
+    )
+    .await?;
+    Ok(resolved.did)
+}
+
+/// Annotate a record's text with the links and mentions it contains.
 ///
 /// Without this a URL is stored as plain text and nothing can click it — which is how a client
-/// ends up unable to share its own address. Mentions are not resolved here (that needs a
-/// handle-to-DID lookup); links are the half that matters for sharing.
-fn attach_facets(record: &mut serde_json::Value, text: &str) {
-    let facets = alt_first_core::link_facets(text);
+/// ends up unable to share its own address — and an `@handle` is just characters.
+///
+/// A mention only becomes a facet when the handle **resolves**: the record has to name a DID,
+/// and a facet pointing at an invented one is worse than plain text. A failed lookup therefore
+/// leaves that mention as typed, which is the honest fallback.
+async fn attach_facets(record: &mut serde_json::Value, text: &str) {
+    let mut facets = alt_first_core::link_facets(text);
+    for candidate in alt_first_core::mention_candidates(text) {
+        if let Ok(did) = resolve_handle(&candidate.handle).await {
+            facets.push(Facet {
+                index: ByteRange {
+                    byte_start: candidate.byte_start,
+                    byte_end: candidate.byte_end,
+                },
+                features: vec![FacetFeature::Mention { did }],
+            });
+        }
+    }
+    // Mentions and links are found separately; a post can contain both, in either order.
+    facets.sort_by_key(|facet| facet.index.byte_start);
     if !facets.is_empty() {
         if let Ok(value) = serde_json::to_value(&facets) {
             record["facets"] = value;
@@ -1868,7 +1904,7 @@ async fn create_post(session: &Session, text: &str) -> Result<String, String> {
         "text": text,
         "createdAt": now_iso().await,
     });
-    attach_facets(&mut record, text);
+    attach_facets(&mut record, text).await;
     let body = serde_json::json!({
         "repo": session.did,
         "collection": "app.bsky.feed.post",

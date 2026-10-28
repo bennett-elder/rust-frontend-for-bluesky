@@ -14,8 +14,12 @@ const app = process.argv[2] ?? 'http://127.0.0.1:8099/';
 const cdp = 'http://localhost:9222';
 const PDS = 'http://127.0.0.1:8199';
 const POST_TEXT =
-  'Sharing the test site: https://bennett-elder.github.io/rust-frontend-for-bluesky/';
+  'Sharing the test site: https://bennett-elder.github.io/rust-frontend-for-bluesky/ with @someone.test';
 const LINK = 'https://bennett-elder.github.io/rust-frontend-for-bluesky/';
+const MENTION = '@someone.test';
+const MENTION_DID = 'did:plc:mentioned';
+// Flipped before the second post, to prove an unresolvable handle stays plain text.
+let resolveMode = 'ok';
 
 const fixture = (name) =>
   JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
@@ -112,6 +116,33 @@ ws.onmessage = (event) => {
   if (message.id && pending.has(message.id)) {
     pending.get(message.id)(message);
     pending.delete(message.id);
+    return;
+  }
+  // Handle resolution goes to the public AppView, so the stub cannot answer it.
+  if (message.method === 'Fetch.requestPaused') {
+    if (resolveMode === 'fail') {
+      send('Fetch.fulfillRequest', {
+        requestId: message.params.requestId,
+        responseCode: 400,
+        responseHeaders: [
+          { name: 'content-type', value: 'application/json' },
+          { name: 'access-control-allow-origin', value: '*' },
+        ],
+        body: Buffer.from(
+          JSON.stringify({ error: 'InvalidRequest', message: 'Unable to resolve handle' }),
+        ).toString('base64'),
+      });
+      return;
+    }
+    send('Fetch.fulfillRequest', {
+      requestId: message.params.requestId,
+      responseCode: 200,
+      responseHeaders: [
+        { name: 'content-type', value: 'application/json' },
+        { name: 'access-control-allow-origin', value: '*' },
+      ],
+      body: Buffer.from(JSON.stringify({ did: MENTION_DID })).toString('base64'),
+    });
   }
 };
 await new Promise((resolve) => (ws.onopen = resolve));
@@ -136,6 +167,7 @@ const run = async (expression) => {
 await send('Runtime.enable');
 await send('Page.enable');
 await send('Network.setCacheDisabled', { cacheDisabled: true });
+await send('Fetch.enable', { patterns: [{ urlPattern: '*resolveHandle*' }] });
 
 await send('Page.navigate', { url: 'about:blank' });
 await wait(300);
@@ -174,6 +206,22 @@ for (let attempt = 0; attempt < 30 && creates.length === 0; attempt += 1) await 
 await wait(800);
 const landed = await run(`location.hash`);
 
+// Second post, with the resolver failing: the mention must stay plain text.
+resolveMode = 'fail';
+await run(`location.hash = '#/compose'`);
+await wait(1500);
+await run(`(() => {
+  const area = document.querySelector('textarea');
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(area, '@nobody.test hello');
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+})()`);
+await wait(600);
+await run(`document.querySelector('.reply-box__send').click()`);
+for (let attempt = 0; attempt < 30 && creates.length < 2; attempt += 1) await wait(300);
+await wait(600);
+const second = creates[1] ? JSON.parse(creates[1]) : {};
+
 await run(
   original === null
     ? `localStorage.removeItem('altfirst.session')`
@@ -184,7 +232,7 @@ ws.close();
 stub.close();
 
 const failures = [];
-if (creates.length !== 1) failures.push(`expected 1 createRecord, saw ${creates.length}`);
+if (creates.length !== 2) failures.push(`expected 2 createRecord calls, saw ${creates.length}`);
 const body = creates.length > 0 ? JSON.parse(creates[0]) : {};
 if (body.repo !== 'did:plc:stub') failures.push(`repo is ${body.repo}`);
 if (body.collection !== 'app.bsky.feed.post') failures.push(`collection is ${body.collection}`);
@@ -194,22 +242,45 @@ if (record.text !== POST_TEXT) failures.push(`text is ${JSON.stringify(record.te
 if (!record.createdAt) failures.push('no createdAt');
 if ('reply' in record) failures.push('a top-level post carried reply refs');
 
-// The link half: this is what makes the URL clickable to everyone who reads the post.
+// Two facets: the link, and the mention that had to be resolved to a DID.
 const facets = record.facets ?? [];
-if (facets.length !== 1) failures.push(`expected 1 facet, saw ${facets.length}`);
-const facet = facets[0] ?? {};
-const expectedStart = POST_TEXT.indexOf(LINK);
-if (facet.index?.byteStart !== expectedStart) {
-  failures.push(`facet starts at ${facet.index?.byteStart}, expected ${expectedStart}`);
+if (facets.length !== 2) failures.push(`expected 2 facets, saw ${facets.length}`);
+const linkFacet = facets.find((f) => f.features?.[0]?.$type === 'app.bsky.richtext.facet#link');
+const mentionFacet = facets.find(
+  (f) => f.features?.[0]?.$type === 'app.bsky.richtext.facet#mention',
+);
+
+const linkStart = POST_TEXT.indexOf(LINK);
+if (linkFacet?.index?.byteStart !== linkStart) {
+  failures.push(`link facet starts at ${linkFacet?.index?.byteStart}, expected ${linkStart}`);
 }
-if (facet.index?.byteEnd !== expectedStart + LINK.length) {
-  failures.push(`facet ends at ${facet.index?.byteEnd}, expected ${expectedStart + LINK.length}`);
+if (linkFacet?.index?.byteEnd !== linkStart + LINK.length) {
+  failures.push(`link facet ends at ${linkFacet?.index?.byteEnd}`);
 }
-const feature = facet.features?.[0] ?? {};
-if (feature.$type !== 'app.bsky.richtext.facet#link') {
-  failures.push(`facet type is ${feature.$type}`);
+if (linkFacet?.features?.[0]?.uri !== LINK) {
+  failures.push(`link facet uri is ${linkFacet?.features?.[0]?.uri}`);
 }
-if (feature.uri !== LINK) failures.push(`facet uri is ${feature.uri}`);
+
+const mentionStart = POST_TEXT.indexOf(MENTION);
+if (mentionFacet?.index?.byteStart !== mentionStart) {
+  failures.push(
+    `mention facet starts at ${mentionFacet?.index?.byteStart}, expected ${mentionStart}`,
+  );
+}
+if (mentionFacet?.index?.byteEnd !== mentionStart + MENTION.length) {
+  failures.push(`mention facet ends at ${mentionFacet?.index?.byteEnd}`);
+}
+if (mentionFacet?.features?.[0]?.did !== MENTION_DID) {
+  failures.push(`mention did is ${JSON.stringify(mentionFacet?.features?.[0]?.did)}`);
+}
+
+// And the fallback: a handle that does not resolve leaves the text alone.
+if (second.record?.text !== '@nobody.test hello') {
+  failures.push(`second post text is ${JSON.stringify(second.record?.text)}`);
+}
+if ((second.record?.facets ?? []).length !== 0) {
+  failures.push(`an unresolvable handle produced ${second.record.facets.length} facet(s)`);
+}
 if (!enabled) failures.push('the Post button was not enabled with text in the box');
 if (typed.count !== `${POST_TEXT.length}/300`) failures.push(`counter showed ${typed.count}`);
 if (!String(landed).startsWith('#/profile/stub.test')) {
