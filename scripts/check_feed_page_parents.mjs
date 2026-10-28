@@ -42,6 +42,8 @@ const parents = [parent('parent-a', 'Parent A'), parent('parent-b', 'Parent B')]
 
 const calls = [];
 let parentLookups = 0;
+// Flipped for the last phase: the lookup must be allowed to fail.
+let parentMode = 'ok';
 const stub = createServer((req, res) => {
   const url = new URL(req.url, PDS);
   calls.push(`${req.method} ${url.pathname}${url.search}`);
@@ -127,6 +129,15 @@ ws.onmessage = (event) => {
   // cannot serve them: those requests are answered here instead.
   if (message.method === 'Fetch.requestPaused') {
     parentLookups += 1;
+    if (parentMode === 'fail') {
+      send('Fetch.fulfillRequest', {
+        requestId: message.params.requestId,
+        responseCode: 500,
+        responseHeaders: [{ name: 'access-control-allow-origin', value: '*' }],
+        body: '',
+      });
+      return;
+    }
     send('Fetch.fulfillRequest', {
       requestId: message.params.requestId,
       responseCode: 200,
@@ -208,6 +219,22 @@ for (let attempt = 0; attempt < 20; attempt += 1) {
   await wait(300);
 }
 
+// A lookup that never resolves must still leave the card saying it is a reply. This is the
+// reported symptom: the line vanished whenever the parent lookup had not landed, leaving the
+// reply indistinguishable from a top-level post.
+parentMode = 'fail';
+await send('Page.navigate', { url: 'about:blank' });
+await wait(300);
+await send('Page.navigate', { url: app + '#/following' });
+for (let attempt = 0; attempt < 40; attempt += 1) {
+  if (await run(`document.querySelectorAll('.post').length > 0`)) break;
+  await wait(500);
+}
+await wait(1500);
+const notesWithoutLookup = await run(
+  `[...document.querySelectorAll('.post__reply-context')].map((node) => node.textContent.trim())`,
+);
+
 await run(
   original === null
     ? `localStorage.removeItem('altfirst.session')`
@@ -224,6 +251,11 @@ if (!notesOnFirstPage.some((note) => note.includes('parent-a.test'))) {
 if (!notesAfterScroll.some((note) => note.includes('parent-b.test'))) {
   failures.push(`the appended page has no note: ${JSON.stringify(notesAfterScroll)}`);
 }
+if (!notesWithoutLookup.some((note) => note.includes('Replying to a post'))) {
+  failures.push(
+    `a failed parent lookup left no note at all: ${JSON.stringify(notesWithoutLookup)}`,
+  );
+}
 if (parentLookups === 0) {
   failures.push('no parent lookup ran at all');
 }
@@ -231,7 +263,7 @@ if (parentLookups === 0) {
 console.log(
   'feed-page-parents:',
   JSON.stringify(
-    { notesOnFirstPage, notesAfterScroll, parentLookups, calls, failures },
+    { notesOnFirstPage, notesAfterScroll, notesWithoutLookup, parentLookups, calls, failures },
     null,
     2,
   ),

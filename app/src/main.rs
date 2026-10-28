@@ -3236,6 +3236,19 @@ fn SettingsView() -> Element {
     }
 }
 
+/// What a card knows about the parent of a reply.
+///
+/// The middle two are the reason this is an enum: "we have not looked it up" and "the AppView
+/// will not return it" both used to arrive as `None`, which is also what "not a reply" looked
+/// like — so a reply silently rendered as a top-level post whenever the lookup was slow or the
+/// request failed.
+enum ReplyContext {
+    NotAReply,
+    Unknown,
+    Unavailable,
+    Handle(String),
+}
+
 /// Feather icons (MIT), inlined so there is no icon-font dependency.
 fn action_icon(kind: &str) -> Element {
     let paths: Vec<&str> = match kind {
@@ -3352,15 +3365,21 @@ fn PostCard(
     // Feed and profile cards know the feed they belong to; thread nodes do not (their
     // nesting already shows the parent), so the line is for lists only.
     let parent_handles = use_context::<ParentHandles>().0;
-    // Outer None: not a list card, or not a reply. Inner None: a reply whose parent the
-    // AppView will not return (deleted, taken down, blocked) — still a reply.
-    let reply_to: Option<Option<String>> = if origin.is_empty() {
-        None
+    // What this card knows about the parent of a reply. Three states rather than two, because
+    // "the parent has not been looked up (yet, or at all)" is not the same as "this is not a
+    // reply": collapsing them made a reply render as a top-level post whenever the lookup was
+    // slow or failed, and that is why the line came and went.
+    let reply_context = if origin.is_empty() {
+        ReplyContext::NotAReply
     } else {
-        post.record
-            .reply
-            .as_ref()
-            .and_then(|reply| parent_handles.read().get(&reply.parent.uri).cloned())
+        match post.record.reply.as_ref() {
+            None => ReplyContext::NotAReply,
+            Some(reply) => match parent_handles.read().get(&reply.parent.uri) {
+                Some(Some(handle)) => ReplyContext::Handle(handle.clone()),
+                Some(None) => ReplyContext::Unavailable,
+                None => ReplyContext::Unknown,
+            },
+        }
     };
 
     // One map for both reactions. A card in a feed, a thread and a profile all read
@@ -3543,16 +3562,21 @@ fn PostCard(
                 // Navigation lives on the article (data-post-link) and is handled by
                 // a delegated listener that ignores clicks made during a selection,
                 // so post text stays selectable.
-                match reply_to {
+                match reply_context {
                     // A reply in a feed is otherwise indistinguishable from a top-level
                     // post until you read what it answers.
-                    Some(Some(handle)) => rsx! {
+                    ReplyContext::Handle(handle) => rsx! {
                         p { class: "post__reply-context", "↳ Replying to @{handle}" }
                     },
-                    Some(None) => rsx! {
+                    ReplyContext::Unavailable => rsx! {
                         p { class: "post__reply-context", "↳ Replying to an unavailable post" }
                     },
-                    None => rsx! {},
+                    // Not looked up yet — or the lookup failed. Saying so is honest and, more
+                    // to the point, keeps the card from pretending to be a top-level post.
+                    ReplyContext::Unknown => rsx! {
+                        p { class: "post__reply-context", "↳ Replying to a post" }
+                    },
+                    ReplyContext::NotAReply => rsx! {},
                 }
                 p { class: "post__text",
                     for segment in segments {
