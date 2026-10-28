@@ -3983,14 +3983,20 @@ fn App() -> Element {
                                         // Accepting replaces the list, so the cache has
                                         // to agree or going back would restore the old
                                         // page-one under a fresh scroll offset.
-                                        let items = page.items.clone();
                                         let cursor = page.cursor.clone();
+                                        // Accepting replaces the list, so it takes the publish
+                                        // path — which is also what resolves the replies it
+                                        // carries.
+                                        publish_feed_page(
+                                            page.items.clone(),
+                                            feed_items,
+                                            parent_handles,
+                                        );
                                         feed_cache.write().insert(
                                             source.key(),
-                                            items.clone(),
+                                            page.items.clone(),
                                             cursor.clone(),
                                         );
-                                        feed_items.set(items);
                                         feed_cursor.set(cursor);
                                         feed_pending.set(None);
                                         scroll_to_top();
@@ -4027,12 +4033,16 @@ fn App() -> Element {
                                             if *feed_generation.peek() != generation {
                                                 return;
                                             }
-                                            let mut items = feed_items();
-                                            items.extend(feed_items_of(&response));
-                                            feed_cache
-                                                .write()
-                                                .insert(key, items.clone(), response.cursor.clone());
-                                            feed_items.set(items);
+                                            let merged = extend_feed_page(
+                                                feed_items_of(&response),
+                                                feed_items,
+                                                parent_handles,
+                                            );
+                                            feed_cache.write().insert(
+                                                key,
+                                                merged,
+                                                response.cursor.clone(),
+                                            );
                                             feed_cursor.set(response.cursor);
                                         }
                                         Err(error) => {
@@ -4954,6 +4964,27 @@ fn publish_feed_page(
     let posts: Vec<PostView> = items.iter().map(|(post, _)| post.clone()).collect();
     feed_items.set(items);
     spawn(async move { remember_parents(&posts, parents).await });
+}
+
+/// Append a page, and remember who its replies answer.
+///
+/// The scroll trigger and the "new posts" pill both used to set `feed_items` themselves, so
+/// page two onward drew replies as top-level posts — and stayed that way until a fresh page
+/// replaced the list. That is the whole bug: the parents of page one were resolved, the parents
+/// of every page after it never were.
+///
+/// Returns the merged list, because the cache has to agree with what was published.
+fn extend_feed_page(
+    page: Vec<(PostView, Option<String>)>,
+    mut feed_items: Signal<Vec<(PostView, Option<String>)>>,
+    parents: Signal<std::collections::HashMap<String, Option<String>>>,
+) -> Vec<(PostView, Option<String>)> {
+    let posts: Vec<PostView> = page.iter().map(|(post, _)| post.clone()).collect();
+    let mut items = feed_items();
+    items.extend(page);
+    feed_items.set(items.clone());
+    spawn(async move { remember_parents(&posts, parents).await });
+    items
 }
 
 /// Notifications need a session: the list is per-account, and the AppView refuses
